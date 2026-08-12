@@ -1,0 +1,12 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; }
+body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background: #0F0C29; color: #E2E8F0; min-height: 100vh; overflow-x: hidden; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.5); border-radius: 3px; }
+input, select, textarea, button { font-family: inherit; }
+button { cursor: pointer; transition: opacity 0.15s, transform 0.1s; border: none; }
+button:hover { opacity: 0.88; }
+button:active { transform: scale(0.97); }
+a { text-decoration: none; color: inherit; }
+* { -webkit-tap-highlight-color: transparent; }
