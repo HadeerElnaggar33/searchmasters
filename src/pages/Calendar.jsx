@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { sb, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, MONTHS } from "../supabase.js";
+import { sb, STATUS_CONFIG, PRIORITY_CONFIG, MONTHS } from "../supabase.js";
 
 export default function Calendar({ user }) {
   const [tasks, setTasks] = useState([]);
@@ -22,8 +22,11 @@ export default function Calendar({ user }) {
     setLoading(false);
   }
 
-  const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
+  const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}-${String(new Date().getDate()).padStart(2,"0")}`;
+
+  function localDateStr(date) {
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+  }
 
   function getDaysInMonth(date) {
     const year = date.getFullYear();
@@ -31,17 +34,20 @@ export default function Calendar({ user }) {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const days = [];
-    // Fill leading empty days (Saturday = 6 in ar, adjust for RTL)
-    let startDow = firstDay.getDay();
-    for (let i = 0; i < startDow; i++) days.push(null);
+    // RTL: أعمدة من اليمين: سبت(6) جمعة(5) خميس(4) أربعاء(3) ثلاثاء(2) إثنين(1) أحد(0)
+    // عدد الخلايا الفاضية قبل أول يوم
+    const dow = firstDay.getDay(); // 0=أحد 6=سبت
+    // في RTL عرضنا: العمود الأول (أقصى اليمين) = أحد(0)
+    // فعدد الفراغات = dow
+    for (let i = 0; i < dow; i++) days.push(null);
     for (let d = 1; d <= lastDay.getDate(); d++) days.push(new Date(year, month, d));
     return days;
   }
 
   function getTasksForDate(date) {
     if (!date) return [];
-    const dateStr = date.toISOString().split("T")[0];
-    const filtered = tasks.filter(t => t.due_date === dateStr);
+    const dateStr = localDateStr(date);
+    const filtered = tasks.filter(t => t.due_date && t.due_date.slice(0,10) === dateStr);
     return isAdmin ? filtered : filtered.filter(t => t.assigned_to === user.name);
   }
 
@@ -66,6 +72,7 @@ export default function Calendar({ user }) {
 
   const days = getDaysInMonth(currentDate);
   const weekDays = getWeekDays();
+  // RTL: أحد في أقصى اليمين → سبت في أقصى اليسار
   const DOW = ["أحد","إثنين","ثلاثاء","أربعاء","خميس","جمعة","سبت"];
 
   if (loading) return <div style={{ textAlign: "center", padding: 60, color: "#6B7280" }}>جاري التحميل...</div>;
@@ -98,20 +105,22 @@ export default function Calendar({ user }) {
       {/* Month View */}
       {view === "month" && (
         <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 16, overflow: "hidden" }}>
+          {/* Day headers */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
             {DOW.map(d => <div key={d} style={{ padding: "10px 4px", textAlign: "center", fontSize: 11, color: "#6B7280", fontWeight: 700 }}>{d}</div>)}
           </div>
+          {/* Day cells */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)" }}>
             {days.map((day, i) => {
               const dayTasks = day ? getTasksForDate(day) : [];
-              const dateStr = day ? day.toISOString().split("T")[0] : null;
+              const dateStr = day ? localDateStr(day) : null;
               const isToday = dateStr === todayStr;
-              const isSelected = selectedDay && day && selectedDay.toISOString().split("T")[0] === dateStr;
+              const isSelected = selectedDay && day && localDateStr(selectedDay) === dateStr;
               return (
-                <div key={i} onClick={() => day && setSelectedDay(day)} style={{ minHeight: 80, padding: "6px 4px", borderRight: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: day ? "pointer" : "default", background: isSelected ? "rgba(99,102,241,0.15)" : isToday ? "rgba(99,102,241,0.08)" : "transparent", transition: "background 0.15s" }}>
+                <div key={i} onClick={() => day && setSelectedDay(day)} style={{ minHeight: 80, padding: "6px 4px", borderRight: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: day ? "pointer" : "default", background: isSelected ? "rgba(99,102,241,0.15)" : isToday ? "rgba(99,102,241,0.08)" : "transparent" }}>
                   {day && (
                     <>
-                      <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? "#A5B4FC" : "#E2E8F0", textAlign: "center", marginBottom: 4, width: 24, height: 24, borderRadius: "50%", background: isToday ? "rgba(99,102,241,0.3)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px" }}>{day.getDate()}</div>
+                      <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? "#A5B4FC" : "#E2E8F0", textAlign: "center", marginBottom: 4, width: 24, height: 24, borderRadius: "50%", background: isToday ? "rgba(99,102,241,0.4)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px" }}>{day.getDate()}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         {dayTasks.slice(0, 2).map(t => {
                           const s = STATUS_CONFIG[t.status] || STATUS_CONFIG.todo;
@@ -136,7 +145,7 @@ export default function Calendar({ user }) {
         <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 16, overflow: "hidden" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)" }}>
             {weekDays.map((day, i) => {
-              const dateStr = day.toISOString().split("T")[0];
+              const dateStr = localDateStr(day);
               const isToday = dateStr === todayStr;
               const dayTasks = getTasksForDate(day);
               return (
