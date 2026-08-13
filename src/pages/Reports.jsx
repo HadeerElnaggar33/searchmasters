@@ -36,7 +36,7 @@ export default function Reports({ user }) {
     <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800 }}>📊 التقارير</h2>
-        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#E2E8F0", padding: "8px 12px", borderRadius: 10, fontSize: 13, outline: "none", direction: "rtl" }}>
+        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#083793", padding: "8px 12px", borderRadius: 10, fontSize: 13, outline: "none", direction: "rtl" }}>
           {MONTHS.map(m => <option key={m} value={`${m} ${new Date().getFullYear()}`}>{m} {new Date().getFullYear()}</option>)}
         </select>
       </div>
