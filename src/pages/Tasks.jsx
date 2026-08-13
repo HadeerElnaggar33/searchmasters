@@ -199,7 +199,7 @@ export default function Tasks({ user }) {
     return true;
   });
 
-  const inp = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#083793", padding: "10px 12px", borderRadius: 10, fontSize: 14, outline: "none", width: "100%", direction: "rtl" };
+  const inp = { background: "#9CA3AF", border: "1px solid rgba(99,102,241,0.25)", color: "#083793", padding: "10px 12px", borderRadius: 10, fontSize: 14, outline: "none", width: "100%", direction: "rtl" };
 
   return (
     <div style={{ padding: 16, maxWidth: 960, margin: "0 auto" }}>
