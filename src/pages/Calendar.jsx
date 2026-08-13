@@ -120,13 +120,13 @@ export default function Calendar({ user }) {
                 <div key={i} onClick={() => day && setSelectedDay(day)} style={{ minHeight: 80, padding: "6px 4px", borderRight: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: day ? "pointer" : "default", background: isSelected ? "rgba(99,102,241,0.15)" : isToday ? "rgba(99,102,241,0.08)" : "transparent" }}>
                   {day && (
                     <>
-                      <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? "#A5B4FC" : "#083793", textAlign: "center", marginBottom: 4, width: 24, height: 24, borderRadius: "50%", background: isToday ? "rgba(99,102,241,0.4)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px" }}>{day.getDate()}</div>
+                      <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? "#083793" : "#083793", textAlign: "center", marginBottom: 4, width: 24, height: 24, borderRadius: "50%", background: isToday ? "rgba(99,102,241,0.4)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px" }}>{day.getDate()}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         {dayTasks.slice(0, 2).map(t => {
                           const s = STATUS_CONFIG[t.status] || STATUS_CONFIG.todo;
                           const proj = projects.find(p => p.id === t.project_id);
                           return (
-                            <div key={t.id} style={{ fontSize: 9, background: proj?.color ? `${proj.color}33` : "rgba(99,102,241,0.2)", color: proj?.color || "#A5B4FC", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.icon} {t.title}</div>
+                            <div key={t.id} style={{ fontSize: 9, background: proj?.color ? `${proj.color}33` : "rgba(99,102,241,0.2)", color: proj?.color || "#083793", borderRadius: 4, padding: "1px 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.icon} {t.title}</div>
                           );
                         })}
                         {dayTasks.length > 2 && <div style={{ fontSize: 9, color: "#6B7280", textAlign: "center" }}>+{dayTasks.length - 2}</div>}
