@@ -1,12 +1,44 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; }
-body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background: #0F0C29; color: #E2E8F0; min-height: 100vh; overflow-x: hidden; }
+
+:root {
+  --bg:           #F8FAFC;
+  --card:         #FFFFFF;
+  --sidebar:      #FFFFFF;
+  --border:       #E2E8F0;
+  --text:         #64748B;
+  --heading:      #0F172A;
+  --subtext:      #94A3B8;
+  --hover-bg:     #E0F2FE;
+  --hover-text:   #0284C7;
+  --selected-bg:  #2563EB;
+  --selected-text:#FFFFFF;
+  --accent:       #2563EB;
+  --accent-light: #EFF6FF;
+  --accent-mid:   #BFDBFE;
+  --success:      #10B981;
+  --warning:      #F59E0B;
+  --danger:       #EF4444;
+  --purple:       #7C3AED;
+  --shadow:       0 1px 4px rgba(15,23,42,0.08), 0 4px 16px rgba(15,23,42,0.06);
+  --shadow-lg:    0 8px 32px rgba(15,23,42,0.12);
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
 ::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
-::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.5); border-radius: 3px; }
+::-webkit-scrollbar-track { background: var(--border); }
+::-webkit-scrollbar-thumb { background: var(--accent-mid); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
 input, select, textarea, button { font-family: inherit; }
-button { cursor: pointer; transition: opacity 0.15s, transform 0.1s; border: none; }
-button:hover { opacity: 0.88; }
+button { cursor: pointer; transition: all 0.15s; border: none; }
 button:active { transform: scale(0.97); }
 a { text-decoration: none; color: inherit; }
 * { -webkit-tap-highlight-color: transparent; }
