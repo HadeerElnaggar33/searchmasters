@@ -65,7 +65,7 @@ export default function Login({ onLogin }) {
           </div>
         </div>
 
-        <p style={{ textAlign: "center", marginTop: 20, color: "#CBD5E1", fontSize: 12 }}>Search Masters Workspace © 2025</p>
+        <p style={{ textAlign: "center", marginTop: 20, color: "#083793", fontSize: 12 }}>Search Masters Workspace © 2026</p>
       </div>
     </div>
   );
