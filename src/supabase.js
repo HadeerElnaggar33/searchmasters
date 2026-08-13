@@ -19,13 +19,10 @@ export async function addNotification(recipient, content, type = "info", taskId 
   await sb("notifications", "POST", { recipient, content, type, related_task_id: taskId });
 }
 
-export function getCurrentMonth() {
-  return new Date().toLocaleString('ar-EG', { month: 'long', year: 'numeric' });
-}
-
 export function formatDate(d) {
   if (!d) return "—";
-  return new Date(d + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "short" });
+  const [y,m,day] = d.slice(0,10).split("-").map(Number);
+  return new Date(y, m-1, day).toLocaleDateString("ar-EG", { day: "numeric", month: "short" });
 }
 
 export function timeAgo(ts) {
@@ -41,30 +38,30 @@ export const MONTHS = ["يناير","فبراير","مارس","أبريل","ما
 export const CURRENT_MONTH = MONTHS[new Date().getMonth()] + " " + new Date().getFullYear();
 
 export const STATUS_CONFIG = {
-  todo:            { label: "To Do",          color: "#6B7280", bg: "rgba(107,114,128,0.15)", icon: "⬜" },
-  in_progress:     { label: "In Progress",    color: "#3B82F6", bg: "rgba(59,130,246,0.15)",  icon: "⚡" },
-  pending_review:  { label: "Pending Review", color: "#F59E0B", bg: "rgba(245,158,11,0.15)",  icon: "👁" },
-  completed:       { label: "Completed",      color: "#10B981", bg: "rgba(16,185,129,0.15)",  icon: "✅" },
-  needs_revision:  { label: "Needs Revision", color: "#EF4444", bg: "rgba(239,68,68,0.15)",   icon: "🔁" },
-  cancelled:       { label: "Cancelled",      color: "#9CA3AF", bg: "rgba(156,163,175,0.15)", icon: "❌" },
+  todo:           { label: "To Do",          color: "#64748B", bg: "#F1F5F9", icon: "⬜" },
+  in_progress:    { label: "In Progress",    color: "#2563EB", bg: "#EFF6FF", icon: "⚡" },
+  pending_review: { label: "Pending Review", color: "#D97706", bg: "#FFFBEB", icon: "👁" },
+  completed:      { label: "Completed",      color: "#059669", bg: "#ECFDF5", icon: "✅" },
+  needs_revision: { label: "Needs Revision", color: "#DC2626", bg: "#FEF2F2", icon: "🔁" },
+  cancelled:      { label: "Cancelled",      color: "#94A3B8", bg: "#F8FAFC", icon: "❌" },
 };
 
 export const PRIORITY_CONFIG = {
-  low:    { label: "Low",    color: "#10B981", icon: "🟢" },
-  medium: { label: "Medium", color: "#3B82F6", icon: "🔵" },
-  high:   { label: "High",   color: "#F59E0B", icon: "🟠" },
-  urgent: { label: "Urgent", color: "#EF4444", icon: "🔴" },
+  low:    { label: "Low",    color: "#059669", icon: "🟢" },
+  medium: { label: "Medium", color: "#2563EB", icon: "🔵" },
+  high:   { label: "High",   color: "#D97706", icon: "🟠" },
+  urgent: { label: "Urgent", color: "#DC2626", icon: "🔴" },
 };
 
 export const RESOURCE_TYPES = [
-  { value: "drive",      label: "Google Drive",          icon: "📁" },
-  { value: "sheets",     label: "Google Sheets",         icon: "📊" },
-  { value: "docs",       label: "Google Docs",           icon: "📄" },
-  { value: "slides",     label: "Google Slides",         icon: "📽" },
-  { value: "search_console", label: "Search Console",   icon: "🔍" },
-  { value: "analytics",  label: "Google Analytics",      icon: "📈" },
-  { value: "semrush",    label: "SEMrush",               icon: "🛠" },
-  { value: "ahrefs",     label: "Ahrefs",                icon: "🔗" },
-  { value: "wordpress",  label: "WordPress",             icon: "🌐" },
-  { value: "other",      label: "Other",                 icon: "🔖" },
+  { value: "drive",         label: "Google Drive",      icon: "📁" },
+  { value: "sheets",        label: "Google Sheets",     icon: "📊" },
+  { value: "docs",          label: "Google Docs",       icon: "📄" },
+  { value: "slides",        label: "Google Slides",     icon: "📽" },
+  { value: "search_console",label: "Search Console",    icon: "🔍" },
+  { value: "analytics",     label: "Google Analytics",  icon: "📈" },
+  { value: "semrush",       label: "SEMrush",           icon: "🛠" },
+  { value: "ahrefs",        label: "Ahrefs",            icon: "🔗" },
+  { value: "wordpress",     label: "WordPress",         icon: "🌐" },
+  { value: "other",         label: "Other",             icon: "🔖" },
 ];
