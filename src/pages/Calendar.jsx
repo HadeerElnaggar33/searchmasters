@@ -93,13 +93,13 @@ export default function Calendar({ user }) {
 
       {/* Navigation */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <button onClick={() => navigate(-1)} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(99,102,241,0.2)", color: "#E2E8F0", padding: "8px 16px", borderRadius: 10, fontSize: 16 }}>→</button>
+        <button onClick={() => navigate(-1)} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(99,102,241,0.2)", color: "#083793", padding: "8px 16px", borderRadius: 10, fontSize: 16 }}>→</button>
         <span style={{ fontSize: 16, fontWeight: 700 }}>
           {view === "month" && `${MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`}
           {view === "week" && `${MONTHS[weekDays[0].getMonth()]} ${weekDays[0].getDate()} — ${weekDays[6].getDate()}`}
           {view === "day" && currentDate.toLocaleDateString("ar-EG", { weekday: "long", day: "numeric", month: "long" })}
         </span>
-        <button onClick={() => navigate(1)} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(99,102,241,0.2)", color: "#E2E8F0", padding: "8px 16px", borderRadius: 10, fontSize: 16 }}>←</button>
+        <button onClick={() => navigate(1)} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(99,102,241,0.2)", color: "#083793", padding: "8px 16px", borderRadius: 10, fontSize: 16 }}>←</button>
       </div>
 
       {/* Month View */}
@@ -120,7 +120,7 @@ export default function Calendar({ user }) {
                 <div key={i} onClick={() => day && setSelectedDay(day)} style={{ minHeight: 80, padding: "6px 4px", borderRight: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: day ? "pointer" : "default", background: isSelected ? "rgba(99,102,241,0.15)" : isToday ? "rgba(99,102,241,0.08)" : "transparent" }}>
                   {day && (
                     <>
-                      <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? "#A5B4FC" : "#E2E8F0", textAlign: "center", marginBottom: 4, width: 24, height: 24, borderRadius: "50%", background: isToday ? "rgba(99,102,241,0.4)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px" }}>{day.getDate()}</div>
+                      <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? "#A5B4FC" : "#083793", textAlign: "center", marginBottom: 4, width: 24, height: 24, borderRadius: "50%", background: isToday ? "rgba(99,102,241,0.4)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px" }}>{day.getDate()}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         {dayTasks.slice(0, 2).map(t => {
                           const s = STATUS_CONFIG[t.status] || STATUS_CONFIG.todo;
@@ -152,7 +152,7 @@ export default function Calendar({ user }) {
                 <div key={i} style={{ borderRight: "1px solid rgba(255,255,255,0.06)", minHeight: 200 }}>
                   <div style={{ padding: "10px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", textAlign: "center", background: isToday ? "rgba(99,102,241,0.15)" : "transparent" }}>
                     <div style={{ fontSize: 11, color: "#6B7280" }}>{DOW[day.getDay()]}</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: isToday ? "#A5B4FC" : "#E2E8F0" }}>{day.getDate()}</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: isToday ? "#A5B4FC" : "#083793" }}>{day.getDate()}</div>
                   </div>
                   <div style={{ padding: "6px 4px", display: "flex", flexDirection: "column", gap: 4 }}>
                     {dayTasks.map(t => {
