@@ -51,18 +51,17 @@ export default function Team({ user }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(2,1fr)", gap: 14 }}>
-        {members.map(m => {
+        {members.filter(m => m.is_active).map(m => {
           const mt = tasks.filter(t => t.assigned_to === m.name);
           const done = mt.filter(t => t.status === "completed").length;
           const pending = mt.filter(t => t.status !== "completed" && t.status !== "cancelled").length;
           const pct = mt.length ? Math.round((done / mt.length) * 100) : 0;
           return (
-            <div key={m.id} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 18, padding: 18, opacity: m.is_active ? 1 : 0.55, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+            <div key={m.id} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 18, padding: 18, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
                 <div style={{ width: 50, height: 50, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, flexShrink: 0, color: "#fff" }}>{m.name[0]}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A" }}>{m.name}</div>
-                  <div style={{ fontSize: 12, color: "#94A3B8" }}>{m.job_title || "—"}</div>
                   {m.email && <div style={{ fontSize: 11, color: "#94A3B8" }}>{m.email}</div>}
                 </div>
                 {isAdmin ? (
