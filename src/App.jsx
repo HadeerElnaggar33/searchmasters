@@ -10,6 +10,7 @@ import Attendance from "./pages/Attendance.jsx";
 import Calendar from "./pages/Calendar.jsx";
 import Templates from "./pages/Templates.jsx";
 import Workload from "./pages/Workload.jsx";
+import SeoChecklist from "./pages/SeoChecklist.jsx";
 
 const NAV = [
   { id: "dashboard",  icon: "🏠", label: "الرئيسية",    mobileShow: true },
@@ -21,6 +22,7 @@ const NAV = [
   { id: "templates",  icon: "⚡", label: "القوالب",     mobileShow: false, adminOnly: true },
   { id: "team",       icon: "👥", label: "الفريق",      mobileShow: false, adminOnly: true },
   { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
+  { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
 
 function useIsMobile() {
@@ -81,6 +83,7 @@ export default function App() {
     calendar:   <Calendar   user={user} />,
     templates:  <Templates  user={user} />,
     workload:   <Workload   user={user} />,
+    seo:        <SeoChecklist user={user} />,
   };
 
   const visibleNav = NAV.filter(n => !n.adminOnly || isAdmin);
