@@ -52,7 +52,7 @@ export default function Attendance({ user }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800 }}>⏰ الحضور والانصراف</h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#E2E8F0", padding: "8px 12px", borderRadius: 10, fontSize: 13, outline: "none" }} />
+          <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#083793", padding: "8px 12px", borderRadius: 10, fontSize: 13, outline: "none" }} />
           <button onClick={loadMonthly} style={{ background: "rgba(99,102,241,0.2)", color: "#A5B4FC", padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 600 }}>📅 تقرير الشهر</button>
         </div>
       </div>
