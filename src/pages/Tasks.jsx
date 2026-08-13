@@ -212,7 +212,7 @@ export default function Tasks({ user }) {
             {MONTHS.map(m => <option key={m} value={`${m} ${new Date().getFullYear()}`}>{m} {new Date().getFullYear()}</option>)}
           </select>
           {isAdmin && (
-            <button onClick={() => { setForm(emptyForm); setShowAdd(true); }} style={{ background: "linear-gradient(135deg,#6366F1,#8B5CF6)", color: "#fff", padding: "8px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>+ تاسك جديد</button>
+            <button onClick={() => { setForm(emptyForm); setShowAdd(true); }} style={{ background: "linear-gradient(135deg,#6366F1,#8B5CF6)", color: "#083793", padding: "8px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>+ تاسك جديد</button>
           )}
         </div>
       </div>
@@ -270,9 +270,9 @@ export default function Tasks({ user }) {
                           <span style={{ fontSize: 11, background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 6 }}>{s.label}</span>
                           <span style={{ fontSize: 11, color: p.color }}>{p.icon} {p.label}</span>
                           {proj && <span style={{ fontSize: 11, color: "#9CA3AF" }}>📁 {proj.name}</span>}
-                          <span style={{ fontSize: 11, color: "#9CA3AF" }}>👤 {task.assigned_to}</span>
+                          <span style={{ fontSize: 11, color: "#083793" }}>👤 {task.assigned_to}</span>
                           {task.due_date && (
-                            <span style={{ fontSize: 11, color: isOverdue ? "#EF4444" : "#9CA3AF" }}>
+                            <span style={{ fontSize: 11, color: isOverdue ? "#083793" : "#9CA3AF" }}>
                               📅 {formatDate(task.due_date)} ({getDayName(task.due_date.slice(0,10))}){isOverdue ? " 🔴" : ""}
                             </span>
                           )}
@@ -413,8 +413,8 @@ export default function Tasks({ user }) {
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
                     <span style={{ fontSize: 12, background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 8, fontWeight: 600 }}>{s.icon} {s.label}</span>
                     <span style={{ fontSize: 12, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
-                    {proj && <span style={{ fontSize: 12, color: "#9CA3AF" }}>📁 {proj.name}</span>}
-                    <span style={{ fontSize: 12, color: "#9CA3AF" }}>👤 {showDetail.assigned_to}</span>
+                    {proj && <span style={{ fontSize: 12, color: "#083793" }}>📁 {proj.name}</span>}
+                    <span style={{ fontSize: 12, color: "#083793" }}>👤 {showDetail.assigned_to}</span>
                     {showDetail.due_date && (
                       <span style={{ fontSize: 12, color: isOverdue ? "#EF4444" : "#9CA3AF" }}>
                         📅 {formatDate(showDetail.due_date)} ({getDayName(showDetail.due_date.slice(0,10))}){isOverdue ? " 🔴" : ""}
