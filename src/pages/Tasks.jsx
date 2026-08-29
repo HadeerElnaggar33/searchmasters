@@ -440,28 +440,47 @@ export default function Tasks({ user }) {
                     <div style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 14, padding: 14, marginBottom: 14 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#A5B4FC", marginBottom: 10 }}>🔗 الروابط والملفات ({attachList.length})</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {attachList.map((item, i) => (
-                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "8px 12px" }}>
-                            <span style={{ fontSize: 18, flexShrink: 0 }}>
-                              {item.url?.includes("sheets") ? "📊" : item.url?.includes("docs") ? "📄" : item.url?.includes("drive") ? "📁" : item.url?.includes("slides") ? "📽" : "🔗"}
-                            </span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              {item.isLink ? (
-                                <a href={item.url} target="_blank" rel="noreferrer" style={{ color: "#6EE7B7", fontSize: 13, fontWeight: 600, textDecoration: "none", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {item.name || item.url}
-                                </a>
-                              ) : (
-                                <span style={{ color: "#9CA3AF", fontSize: 13 }}>{item.url}</span>
-                              )}
-                              {item.name && item.isLink && (
-                                <span style={{ fontSize: 10, color: "#4B5563", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.url}</span>
-                              )}
-                            </div>
-                            {item.isLink && (
-                              <a href={item.url} target="_blank" rel="noreferrer" style={{ background: "rgba(99,102,241,0.2)", color: "#A5B4FC", padding: "4px 10px", borderRadius: 6, fontSize: 11, textDecoration: "none", flexShrink: 0 }}>فتح ↗</a>
-                            )}
-                          </div>
-                        ))}
+                      {attachList.map((item, i) => {
+  const icon = item.url?.includes("sheets") ? "📊"
+    : item.url?.includes("docs") ? "📄"
+    : item.url?.includes("drive") ? "📁"
+    : item.url?.includes("slides") ? "📽"
+    : item.url?.includes("analytics") ? "📈"
+    : "🔗";
+
+  // استخراج اسم الملف من الرابط لو مفيش اسم
+  function extractName(url) {
+    try {
+      const u = new URL(url);
+      // Google Docs/Sheets/Slides
+      const match = u.pathname.match(/\/d\/([^/]+)/);
+      if (match) return u.hostname.includes("sheets") ? "Google Sheet" : u.hostname.includes("docs") ? "Google Doc" : u.hostname.includes("slides") ? "Google Slides" : "Google Drive";
+      // اسم من آخر الرابط
+      const parts = u.pathname.split("/").filter(Boolean);
+      return decodeURIComponent(parts[parts.length - 1] || url);
+    } catch { return url; }
+  }
+
+  const displayName = item.name || (item.isLink ? extractName(item.url) : item.url);
+
+  return (
+    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#F8FAFC", borderRadius: 10, padding: "10px 14px", border: "1px solid #E2E8F0" }}>
+      <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {item.isLink ? (
+          <a href={item.url} target="_blank" rel="noreferrer" style={{ color: "#2563EB", fontSize: 13, fontWeight: 600, textDecoration: "none", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {displayName}
+          </a>
+        ) : (
+          <span style={{ color: "#64748B", fontSize: 13 }}>{item.url}</span>
+        )}
+      </div>
+      {item.isLink && (
+        <a href={item.url} target="_blank" rel="noreferrer" style={{ background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", padding: "4px 12px", borderRadius: 6, fontSize: 12, textDecoration: "none", flexShrink: 0, fontWeight: 600 }}>فتح ↗</a>
+      )}
+    </div>
+  );
+})}
                       </div>
                     </div>
                   )}
