@@ -424,11 +424,16 @@ export default function Tasks({ user }) {
                   </div>
 
                   {/* Notes */}
-                  {showDetail.notes && (
-                    <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#C4B5FD", lineHeight: 1.6 }}>
-                      {showDetail.notes}
-                    </div>
-                  )}
+                 {showDetail.notes && (
+                   <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 16px", marginBottom: 14, border: "1px solid #E2E8F0" }}>
+                   {showDetail.notes.split("\n").filter(l => l.trim()).map((line, i) => (
+             <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
+             <span style={{ color: "#2563EB", fontWeight: 700, flexShrink: 0, marginTop: 1 }}>•</span>
+             <span style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{line.trim()}</span>
+           </div>
+              ))}
+           </div>
+                    )}
 
                   {/* Attachments */}
                   {attachList.length > 0 && (
