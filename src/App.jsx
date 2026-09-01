@@ -10,6 +10,7 @@ import Attendance from "./pages/Attendance.jsx";
 import Calendar from "./pages/Calendar.jsx";
 import Templates from "./pages/Templates.jsx";
 import Workload from "./pages/Workload.jsx";
+import Notifications from "./pages/Notifications.jsx";
 import SeoChecklist from "./pages/SeoChecklist.jsx";
 
 const NAV = [
@@ -22,6 +23,7 @@ const NAV = [
   { id: "templates",  icon: "⚡", label: "القوالب",     mobileShow: false, adminOnly: true },
   { id: "team",       icon: "👥", label: "الفريق",      mobileShow: false, adminOnly: true },
   { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
+  { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
 
@@ -84,6 +86,7 @@ export default function App() {
     templates:  <Templates  user={user} />,
     workload:   <Workload   user={user} />,
     seo:        <SeoChecklist user={user} />,
+    notifications: <Notifications user={user} />,
   };
 
   const visibleNav = NAV.filter(n => !n.adminOnly || isAdmin);
@@ -168,7 +171,7 @@ export default function App() {
           {/* Notifications */}
           <div style={{ position: "relative" }}>
             <button
-              onClick={() => { setShowNotifs(v => !v); if (!showNotifs) markAllRead(); }}
+onClick={() => setPage("notifications")}
               style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", width: 36, height: 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, position: "relative" }}
             >
               🔔
