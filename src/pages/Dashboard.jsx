@@ -34,18 +34,32 @@ export default function Dashboard({ user, onNavigate }) {
     setLoading(false);
   }
 
-  async function clockIn() {
-    if (attendance.find(a => a.member_name === user.name)) return;
-    await sb("attendance", "POST", { member_name: user.name, date: today, clock_in: new Date().toISOString(), status: "present" });
-    await loadAll();
+ async function clockIn() {
+  if (attendance.find(a => a.member_name === user.name)) return;
+  const now = new Date().toISOString();
+  const att = await sb("attendance", "POST", { member_name: user.name, date: today, clock_in: now, status: "present" });
+  if (att?.[0]) {
+    await sb("attendance_sessions", "POST", { attendance_id: att[0].id, member_name: user.name, date: today, start_time: now, type: "work" });
   }
+  await loadAll();
+}
 
-  async function clockOut() {
-    if (!clockedIn) return;
-    const now = new Date(); const mins = Math.floor((now - new Date(clockedIn.clock_in)) / 60000);
-    await sb(`attendance?id=eq.${clockedIn.id}`, "PATCH", { clock_out: now.toISOString(), working_minutes: mins });
-    setClockedIn(null); await loadAll();
+async function clockOut() {
+  if (!clockedIn) return;
+  const now = new Date();
+  // أغلق الـ session المفتوحة
+  const sessions = await sb(`attendance_sessions?attendance_id=eq.${clockedIn.id}&end_time=is.null`);
+  if (sessions?.length) {
+    const mins = Math.floor((now - new Date(sessions[0].start_time)) / 60000);
+    await sb(`attendance_sessions?id=eq.${sessions[0].id}`, "PATCH", { end_time: now.toISOString(), duration_minutes: mins });
   }
+  // احسب الإجمالي
+  const allSessions = await sb(`attendance_sessions?attendance_id=eq.${clockedIn.id}`);
+  const totalMins = (allSessions || []).reduce((s, x) => s + (x.duration_minutes || 0), 0);
+  await sb(`attendance?id=eq.${clockedIn.id}`, "PATCH", { clock_out: now.toISOString(), working_minutes: totalMins });
+  setClockedIn(null);
+  await loadAll();
+}
 
   const myTasks = tasks.filter(t => t.assigned_to === user.name);
   const todayTasks = isAdmin ? tasks : myTasks;
@@ -72,13 +86,17 @@ export default function Dashboard({ user, onNavigate }) {
         {!myAtt
           ? <button onClick={clockIn} style={{ background: "linear-gradient(135deg,#10B981,#059669)", color: "#fff", padding: "10px 20px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 4px 12px rgba(16,185,129,0.3)" }}>🟢 بدء العمل</button>
           : !myAtt.clock_out
-            ? <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: "#059669", background: "#ECFDF5", padding: "6px 12px", borderRadius: 8, border: "1px solid #A7F3D0" }}>🟢 شغال من {new Date(myAtt.clock_in).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</span>
-                <button onClick={clockOut} style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)", color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>🔴 إنهاء العمل</button>
-              </div>
-            : <span style={{ fontSize: 12, color: "#64748B", background: "#F1F5F9", padding: "8px 14px", borderRadius: 10, border: "1px solid #E2E8F0" }}>⏱ {Math.floor(myAtt.working_minutes/60)}س {myAtt.working_minutes%60}د</span>
-        }
-      </div>
+  ? <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 12, color: "#059669", background: "#ECFDF5", padding: "6px 12px", borderRadius: 8, border: "1px solid #A7F3D0" }}>
+        🟢 {new Date(myAtt.clock_in).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
+      </span>
+      <button onClick={() => window.location.hash = "#attendance"} style={{ background: "#FFF7ED", border: "1px solid #FED7AA", color: "#D97706", padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700 }}>
+        ⏸ إيقاف مؤقت
+      </button>
+      <button onClick={clockOut} style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)", color: "#fff", padding: "8px 16px", borderRadius: 10, fontSize: 12, fontWeight: 700 }}>
+        🔴 إنهاء العمل
+      </button>
+    </div>
 
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 20 }}>
