@@ -98,7 +98,9 @@ async function clockOut() {
       </button>
     </div>
            : null}
-
+ </div>
+    </div>
+  );
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 20 }}>
         {statCard("الكل", todayTasks.length, "#2563EB", "#EFF6FF", "📋")}
