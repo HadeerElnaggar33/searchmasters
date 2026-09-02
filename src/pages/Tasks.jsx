@@ -29,6 +29,16 @@ function parseAttachments(text) {
   });
 }
 
+function parseHelpers(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean);
+  return String(val).split(",").map(x => x.trim()).filter(Boolean);
+}
+
+function isOnTask(task, name) {
+  return task.assigned_to === name || parseHelpers(task.helpers).includes(name);
+}
+
 function getFileIcon(url) {
   if (!url) return "🔗";
   if (url.includes("sheets")) return "📊";
@@ -71,7 +81,7 @@ export default function Tasks({ user }) {
   const today = getTodayStr();
 
   const emptyForm = {
-    title: "", project_id: "", assigned_to: user.name,
+    title: "", project_id: "", assigned_to: user.name, helpers: [],
     task_type: "Keyword Research", status: "todo", priority: "medium",
     month: CURRENT_MONTH, task_date: today, due_date: today, notes: "", attachments: "",
   };
@@ -117,11 +127,15 @@ export default function Tasks({ user }) {
       status: "todo", priority: form.priority, month: form.month,
       due_date: form.task_date || null, task_date: form.task_date || null,
       notes: form.notes, attachments: form.attachments, created_by: user.name,
+      helpers: form.helpers.length ? form.helpers.join(", ") : null,
     };
     const res = await sb("tasks", "POST", payload);
     if (res && res[0]) {
-      await addHistory(res[0].id, "created", user.name, `تعيين لـ ${form.assigned_to}`);
+      await addHistory(res[0].id, "created", user.name, form.helpers.length ? `تعيين لـ ${form.assigned_to} + مساعدة: ${form.helpers.join("، ")}` : `تعيين لـ ${form.assigned_to}`);
       await addNotification(form.assigned_to, `📌 تاسك جديد: ${form.title}`, "assign", res[0].id);
+      for (const h of form.helpers) {
+        await addNotification(h, `🤝 تمت إضافتك كمساعد في: ${form.title}`, "assign", res[0].id);
+      }
       setSaving(false); setShowAdd(false); setForm(emptyForm); await loadAll();
     } else {
       setSaving(false); alert("حصل خطأ في الإضافة، جربي تاني");
@@ -130,13 +144,19 @@ export default function Tasks({ user }) {
 
   async function saveEdit() {
     if (!editForm.title?.trim()) return;
+    const newHelpers = (editForm.helpers || []).filter(h => h !== editForm.assigned_to);
+    const oldHelpers = parseHelpers(showEdit.helpers);
     await sb(`tasks?id=eq.${showEdit.id}`, "PATCH", {
       title: editForm.title, notes: editForm.notes,
       attachments: editForm.attachments, due_date: editForm.due_date || null,
       priority: editForm.priority, assigned_to: editForm.assigned_to,
+      helpers: newHelpers.length ? newHelpers.join(", ") : null,
       task_type: editForm.task_type,
     });
     await addHistory(showEdit.id, "edited", user.name, "تم تعديل التاسك");
+    for (const h of newHelpers.filter(x => !oldHelpers.includes(x))) {
+      await addNotification(h, `🤝 تمت إضافتك كمساعد في: ${editForm.title}`, "assign", showEdit.id);
+    }
     await loadAll();
     setShowEdit(null);
     setShowDetail(null);
@@ -199,13 +219,43 @@ export default function Tasks({ user }) {
   }
 
   const filtered = tasks.filter(t => {
-    if (!isAdmin && t.assigned_to !== user.name) return false;
+    if (!isAdmin && !isOnTask(t, user.name)) return false;
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
-    if (filterAssignee !== "all" && t.assigned_to !== filterAssignee) return false;
+    if (filterAssignee !== "all" && !isOnTask(t, filterAssignee)) return false;
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
-    if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.assigned_to?.includes(search)) return false;
+    if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.assigned_to?.includes(search) && !parseHelpers(t.helpers).some(h => h.includes(search))) return false;
     return true;
   });
+
+  const HelperPicker = ({ value, owner, onChange }) => {
+    const list = value || [];
+    const options = members.filter(m => m.name !== owner);
+    return (
+      <div>
+        <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>🤝 مساعدون في التنفيذ (اختياري)</div>
+        <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 8 }}>اضغطي على الاسم لإضافته أو إزالته — ممكن تختاري أكتر من واحد</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {options.length === 0 && <span style={{ fontSize: 12, color: "#94A3B8" }}>لا يوجد أعضاء آخرون</span>}
+          {options.map(m => {
+            const on = list.includes(m.name);
+            return (
+              <button key={m.id} type="button"
+                onClick={() => onChange(on ? list.filter(x => x !== m.name) : [...list, m.name])}
+                style={{
+                  background: on ? "#7C3AED" : "#F8FAFC",
+                  color: on ? "#FFFFFF" : "#64748B",
+                  border: `1.5px solid ${on ? "#7C3AED" : "#E2E8F0"}`,
+                  padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: on ? 700 : 500,
+                }}>
+                {on ? "✓ " : "+ "}{m.name}
+              </button>
+            );
+          })}
+        </div>
+        {list.length === 0 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>مفيش مساعدين — التاسك للمسؤول الأساسي بس</div>}
+      </div>
+    );
+  };
 
   const AttachList = ({ text }) => {
     const list = parseAttachments(text);
@@ -302,6 +352,11 @@ export default function Tasks({ user }) {
                           <span style={{ fontSize: 11, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
                           {proj && <span style={{ fontSize: 11, color: "#64748B" }}>📁 {proj.name}</span>}
                           <span style={{ fontSize: 11, color: "#64748B" }}>👤 {task.assigned_to}</span>
+                          {parseHelpers(task.helpers).length > 0 && (
+                            <span style={{ fontSize: 11, background: "#F5F3FF", color: "#7C3AED", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                              🤝 {parseHelpers(task.helpers).join("، ")}
+                            </span>
+                          )}
                           {task.due_date && (
                             <span style={{ fontSize: 11, color: isOverdue ? "#DC2626" : "#64748B", fontWeight: isOverdue ? 700 : 400 }}>
                               📅 {formatDate(task.due_date)} ({getDayName(task.due_date.slice(0,10))}){isOverdue ? " 🔴" : ""}
@@ -360,8 +415,8 @@ export default function Tasks({ user }) {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
-                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>المسؤول</div>
-                  <select value={form.assigned_to} onChange={e => setForm(f => ({ ...f, assigned_to: e.target.value }))} style={inp}>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>المسؤول الأساسي</div>
+                  <select value={form.assigned_to} onChange={e => setForm(f => ({ ...f, assigned_to: e.target.value, helpers: (f.helpers || []).filter(h => h !== e.target.value) }))} style={inp}>
                     {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
                   </select>
                 </div>
@@ -372,6 +427,7 @@ export default function Tasks({ user }) {
                   </select>
                 </div>
               </div>
+              <HelperPicker value={form.helpers} owner={form.assigned_to} onChange={v => setForm(f => ({ ...f, helpers: v }))} />
               <div>
                 <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>ملاحظات</div>
                 <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 4 }}>كل سطر هيظهر كنقطة منفصلة</div>
@@ -405,7 +461,8 @@ export default function Tasks({ user }) {
               const p = PRIORITY_CONFIG[showDetail.priority] || PRIORITY_CONFIG.medium;
               const proj = projects.find(x => x.id === showDetail.project_id);
               const isOverdue = showDetail.due_date && showDetail.due_date.slice(0,10) < today && showDetail.status !== "completed";
-              const canEdit = isAdmin || showDetail.assigned_to === user.name;
+              const detailHelpers = parseHelpers(showDetail.helpers);
+              const canEdit = isAdmin || isOnTask(showDetail, user.name);
               return (
                 <>
                   <h2 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 800, color: "#0F172A", paddingLeft: 30, lineHeight: 1.4 }}>{showDetail.title}</h2>
@@ -413,7 +470,10 @@ export default function Tasks({ user }) {
                     <span style={{ fontSize: 12, background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 8, fontWeight: 600 }}>{s.icon} {s.label}</span>
                     <span style={{ fontSize: 12, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
                     {proj && <span style={{ fontSize: 12, color: "#64748B" }}>📁 {proj.name}</span>}
-                    <span style={{ fontSize: 12, color: "#64748B" }}>👤 {showDetail.assigned_to}</span>
+                    <span style={{ fontSize: 12, color: "#64748B" }}>👤 {showDetail.assigned_to} <span style={{ fontSize: 10, color: "#94A3B8" }}>(مسؤول أساسي)</span></span>
+                    {detailHelpers.map(h => (
+                      <span key={h} style={{ fontSize: 12, background: "#F5F3FF", color: "#7C3AED", padding: "3px 10px", borderRadius: 8, fontWeight: 600 }}>🤝 {h}</span>
+                    ))}
                     {showDetail.due_date && (
                       <span style={{ fontSize: 12, color: isOverdue ? "#DC2626" : "#64748B", fontWeight: isOverdue ? 700 : 400 }}>
                         📅 {formatDate(showDetail.due_date)} ({getDayName(showDetail.due_date.slice(0,10))}){isOverdue ? " 🔴" : ""}
@@ -446,6 +506,7 @@ export default function Tasks({ user }) {
                           attachments: showDetail.attachments || "",
                           due_date: showDetail.due_date?.slice(0,10) || "",
                           priority: showDetail.priority, assigned_to: showDetail.assigned_to,
+                          helpers: parseHelpers(showDetail.helpers),
                           task_type: showDetail.task_type,
                         });
                         setShowEdit(showDetail);
@@ -520,8 +581,8 @@ export default function Tasks({ user }) {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
-                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>المسؤول</div>
-                  <select value={editForm.assigned_to} onChange={e => setEditForm(f => ({ ...f, assigned_to: e.target.value }))} style={inp}>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>المسؤول الأساسي</div>
+                  <select value={editForm.assigned_to} onChange={e => setEditForm(f => ({ ...f, assigned_to: e.target.value, helpers: (f.helpers || []).filter(h => h !== e.target.value) }))} style={inp}>
                     {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
                   </select>
                 </div>
@@ -532,6 +593,7 @@ export default function Tasks({ user }) {
                   </select>
                 </div>
               </div>
+              <HelperPicker value={editForm.helpers} owner={editForm.assigned_to} onChange={v => setEditForm(f => ({ ...f, helpers: v }))} />
               <div>
                 <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>
                   الديدلاين {editForm.due_date && <span style={{ color: "#2563EB" }}>— {getDayName(editForm.due_date)}</span>}
