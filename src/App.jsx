@@ -12,6 +12,7 @@ import Templates from "./pages/Templates.jsx";
 import Workload from "./pages/Workload.jsx";
 import Notifications from "./pages/Notifications.jsx";
 import SeoChecklist from "./pages/SeoChecklist.jsx";
+import EmployeeOfMonth from "./pages/EmployeeOfMonth.jsx";
 
 const NAV = [
   { id: "dashboard",  icon: "🏠", label: "الرئيسية",    mobileShow: true },
@@ -22,6 +23,7 @@ const NAV = [
   { id: "workload",   icon: "⚖️", label: "توزيع العمل", mobileShow: false, adminOnly: true },
   { id: "templates",  icon: "⚡", label: "القوالب",     mobileShow: false, adminOnly: true },
   { id: "team",       icon: "👥", label: "الفريق",      mobileShow: false, adminOnly: true },
+  { id: "eom",        icon: "🏆", label: "موظف الشهر",  mobileShow: false },
   { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
   { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
@@ -86,6 +88,7 @@ export default function App() {
     templates:  <Templates  user={user} />,
     workload:   <Workload   user={user} />,
     seo:        <SeoChecklist user={user} />,
+    eom:        <EmployeeOfMonth user={user} />,
     notifications: <Notifications user={user} />,
   };
 
