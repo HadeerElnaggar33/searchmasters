@@ -11,6 +11,18 @@ export async function sb(path, method = "GET", body = null) {
   } catch(e) { console.error(e); return null; }
 }
 
+export async function sbUpload(bucket, path, file) {
+  try {
+    const res = await fetch(`${URL}/storage/v1/object/${bucket}/${encodeURIComponent(path)}`, {
+      method: "POST",
+      headers: { "apikey": KEY, "Authorization": `Bearer ${KEY}`, "x-upsert": "true" },
+      body: file,
+    });
+    if (!res.ok) { console.error("SB Upload Error:", await res.text()); return null; }
+    return `${URL}/storage/v1/object/public/${bucket}/${encodeURIComponent(path)}`;
+  } catch(e) { console.error(e); return null; }
+}
+
 export async function addHistory(taskId, action, performedBy, details = "") {
   await sb("task_history", "POST", { task_id: taskId, action, performed_by: performedBy, details });
 }
