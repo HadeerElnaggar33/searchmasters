@@ -1,7 +1,17 @@
 import { useState, useEffect } from "react";
 import { sb, RESOURCE_TYPES } from "../supabase.js";
 
-const PROJECT_TYPES = ["SEO","Content Marketing","Technical SEO","Local SEO","E-commerce SEO","Link Building","Other"];
+const PROJECT_TYPES = [
+  "SEO","Technical SEO","Local SEO","E-commerce SEO",
+  "Content Marketing","Static Page Content","Link Building",
+  "AI","ASO","Google Ads","Meta Ads","Reviews","Other",
+];
+
+function parseTypes(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean);
+  return String(val).split(",").map(x => x.trim()).filter(Boolean);
+}
 const PROJECT_STATUSES = [{ v:"active", l:"نشط", c:"#059669" },{ v:"paused", l:"موقوف", c:"#D97706" },{ v:"completed", l:"منتهي", c:"#64748B" }];
 const COLORS = ["#2563EB","#7C3AED","#059669","#DC2626","#D97706","#0891B2","#DB2777","#9333EA"];
 
@@ -17,7 +27,7 @@ export default function Projects({ user }) {
   const [loading, setLoading] = useState(true);
   const isAdmin = user.role === "admin" || user.role === "team_leader";
 
-  const emptyForm = { name: "", client_name: "", website_url: "", project_type: "SEO", status: "active", description: "", team_members: [], color: "#2563EB" };
+  const emptyForm = { name: "", client_name: "", website_url: "", project_type: [], status: "active", description: "", team_members: [], color: "#2563EB" };
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
   const [resForm, setResForm] = useState({ name: "", url: "", type: "drive" });
@@ -41,7 +51,7 @@ export default function Projects({ user }) {
 
   async function addProject() {
     if (!form.name.trim()) return;
-    await sb("projects", "POST", form);
+    await sb("projects", "POST", { ...form, project_type: parseTypes(form.project_type).join(", ") || null });
     await loadAll();
     setShowAdd(false);
     setForm(emptyForm);
@@ -51,7 +61,7 @@ export default function Projects({ user }) {
     if (!editForm.name.trim() || !showEdit) return;
     await sb(`projects?id=eq.${showEdit.id}`, "PATCH", {
       name: editForm.name, client_name: editForm.client_name,
-      website_url: editForm.website_url, project_type: editForm.project_type,
+      website_url: editForm.website_url, project_type: parseTypes(editForm.project_type).join(", ") || null,
       status: editForm.status, description: editForm.description,
       team_members: editForm.team_members, color: editForm.color,
     });
@@ -80,6 +90,35 @@ export default function Projects({ user }) {
     setConfirmDeleteRes(null);
   }
 
+  const TypePicker = ({ value, onChange }) => {
+    const list = parseTypes(value);
+    return (
+      <div>
+        <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>نوع المشروع</div>
+        <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 8 }}>ممكن تختاري أكتر من نوع — اضغطي على النوع لإضافته أو إزالته</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {PROJECT_TYPES.map(t => {
+            const on = list.includes(t);
+            return (
+              <button key={t} type="button"
+                onClick={() => onChange(on ? list.filter(x => x !== t) : [...list, t])}
+                style={{
+                  padding: "6px 12px", borderRadius: 20,
+                  border: on ? "2px solid #2563EB" : "1px solid #E2E8F0",
+                  background: on ? "#EFF6FF" : "#F8FAFC",
+                  color: on ? "#2563EB" : "#64748B",
+                  fontSize: 12, fontWeight: on ? 700 : 500, cursor: "pointer",
+                }}>
+                {on ? "✓ " : "+ "}{t}
+              </button>
+            );
+          })}
+        </div>
+        {list.length === 0 && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>لم يتم اختيار أي نوع بعد</div>}
+      </div>
+    );
+  };
+
   if (loading) return <div style={{ textAlign: "center", padding: 60, color: "#94A3B8" }}>جاري التحميل...</div>;
 
   // ── Project Detail ──
@@ -93,7 +132,7 @@ export default function Projects({ user }) {
             <button onClick={() => {
               setEditForm({
                 name: selected.name, client_name: selected.client_name || "",
-                website_url: selected.website_url || "", project_type: selected.project_type || "SEO",
+                website_url: selected.website_url || "", project_type: parseTypes(selected.project_type),
                 status: selected.status || "active", description: selected.description || "",
                 team_members: selected.team_members || [], color: selected.color || "#2563EB",
               });
@@ -110,7 +149,9 @@ export default function Projects({ user }) {
               <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0F172A", marginBottom: 4 }}>{selected.name}</h2>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12, background: `${statusConf.c}15`, color: statusConf.c, padding: "2px 10px", borderRadius: 8, fontWeight: 600 }}>{statusConf.l}</span>
-                <span style={{ fontSize: 12, color: "#94A3B8" }}>{selected.project_type}</span>
+                {parseTypes(selected.project_type).map(t => (
+                  <span key={t} style={{ fontSize: 12, background: "#EFF6FF", color: "#2563EB", padding: "2px 10px", borderRadius: 8, fontWeight: 600 }}>{t}</span>
+                ))}
               </div>
             </div>
           </div>
@@ -210,18 +251,13 @@ export default function Projects({ user }) {
                   <input value={editForm.client_name} onChange={e => setEditForm(f => ({ ...f, client_name: e.target.value }))} placeholder="اسم العميل" style={inp} />
                   <input value={editForm.website_url} onChange={e => setEditForm(f => ({ ...f, website_url: e.target.value }))} placeholder="رابط الموقع" style={{ ...inp, direction: "ltr" }} />
                   <div>
-                    <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>نوع المشروع</div>
-                    <select value={editForm.project_type} onChange={e => setEditForm(f => ({ ...f, project_type: e.target.value }))} style={inp}>
-                      {PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div>
                     <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>الحالة</div>
                     <select value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))} style={inp}>
                       {PROJECT_STATUSES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
                     </select>
                   </div>
                 </div>
+                <TypePicker value={editForm.project_type} onChange={v => setEditForm(f => ({ ...f, project_type: v }))} />
                 <div>
                   <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>أعضاء الفريق</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -273,7 +309,9 @@ export default function Projects({ user }) {
                     <span style={{ fontSize: 11, background: `${statusConf.c}15`, color: statusConf.c, padding: "2px 8px", borderRadius: 6, fontWeight: 600, flexShrink: 0 }}>{statusConf.l}</span>
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 11, color: "#94A3B8" }}>{p.project_type}</span>
+                    {parseTypes(p.project_type).map(t => (
+                      <span key={t} style={{ fontSize: 11, background: "#EFF6FF", color: "#2563EB", padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{t}</span>
+                    ))}
                     {p.website_url && <span style={{ fontSize: 11, color: "#2563EB" }}>🌐 {p.website_url}</span>}
                     {p.team_members?.length > 0 && <span style={{ fontSize: 11, color: "#94A3B8" }}>👥 {p.team_members.length} أشخاص</span>}
                   </div>
@@ -295,18 +333,13 @@ export default function Projects({ user }) {
                 <input value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))} placeholder="اسم العميل" style={inp} />
                 <input value={form.website_url} onChange={e => setForm(f => ({ ...f, website_url: e.target.value }))} placeholder="رابط الموقع" style={{ ...inp, direction: "ltr" }} />
                 <div>
-                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>نوع المشروع</div>
-                  <select value={form.project_type} onChange={e => setForm(f => ({ ...f, project_type: e.target.value }))} style={inp}>
-                    {PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
                   <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>الحالة</div>
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inp}>
                     {PROJECT_STATUSES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
                   </select>
                 </div>
               </div>
+              <TypePicker value={form.project_type} onChange={v => setForm(f => ({ ...f, project_type: v }))} />
               <div>
                 <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>أعضاء الفريق</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
