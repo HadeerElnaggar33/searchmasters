@@ -347,7 +347,7 @@ export default function Attendance({ user }) {
                       <span style={{ color: "#059669", fontWeight: 600 }}>{fmtTime(r.clock_in)}</span>
                       <span style={{ color: "#DC2626", fontWeight: 600 }}>{r.clock_out ? fmtTime(r.clock_out) : "—"}</span>
                       <span style={{ color: "#2563EB", fontWeight: 700 }}>{fmtDuration(r.working_minutes)}</span>
-                    </div>
+                   </div>
                   ))}
                 </div>
               </>
