@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { sb, PRIORITY_CONFIG, CURRENT_MONTH, MONTHS } from "../supabase.js";
+import { loadWorkConfig } from "../workdays.js";
+import { nextDueDate, runRecurringEngine } from "../recurring.js";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const FREQUENCIES = [{ v:"daily", l:"يومي" },{ v:"weekly", l:"أسبوعي" },{ v:"monthly", l:"شهري" }];
@@ -34,6 +36,8 @@ export default function Templates({ user }) {
   const [projects, setProjects] = useState([]);
   const [members, setMembers] = useState([]);
   const [tab, setTab] = useState("templates");
+  const [cfg, setCfg] = useState({ workingDays: [0,1,2,3,4], holidays: [] });
+  const [running, setRunning] = useState(false);
   const [showAddTemplate, setShowAddTemplate] = useState(false);
   const [showAddRecurring, setShowAddRecurring] = useState(false);
   const [showApply, setShowApply] = useState(null);
@@ -46,12 +50,14 @@ export default function Templates({ user }) {
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const [t, r, p, m] = await Promise.all([
+    const [t, r, p, m, c] = await Promise.all([
       sb("task_templates?order=created_at.desc"),
       sb("recurring_tasks?order=created_at.desc"),
       sb("projects?select=id,name&order=name"),
       sb("team_members?is_active=eq.true&order=name"),
+      loadWorkConfig(),
     ]);
+    if (c) setCfg(c);
     if (t) setTemplates(t);
     if (r) setRecurring(r);
     if (p) setProjects(p);
@@ -120,6 +126,14 @@ export default function Templates({ user }) {
       created_by: user.name,
     });
     alert(`✅ تم إنشاء تاسك: ${r.title}`);
+  }
+
+  async function runEngineNow() {
+    setRunning(true);
+    const res = await runRecurringEngine(user.name);
+    setRunning(false);
+    await loadAll();
+    alert(res?.error ? "حصل خطأ أثناء الفحص" : res.created > 0 ? `✅ تم إنشاء ${res.created} تاسك` : "✅ كل التاسكات المتكررة متولدة — مفيش حاجة مستحقة");
   }
 
   const inp = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#E2E8F0", padding: "10px 12px", borderRadius: 10, fontSize: 14, outline: "none", width: "100%", direction: "rtl" };
@@ -198,6 +212,17 @@ export default function Templates({ user }) {
       {/* Recurring */}
       {tab === "recurring" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.25)", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 18 }}>⚙️</span>
+            <div style={{ flex: 1, minWidth: 160, fontSize: 12, color: "#9CA3AF", lineHeight: 1.7 }}>
+              التاسكات بتتولد أوتوماتيك أول ما أول حد يفتح الأبلكيشن في اليوم المستحق، وبتتعوّض لو الأبلكيشن مافتحش لمدة تصل لـ 10 أيام. مواعيد العطلات بتتزحزح لأول يوم عمل بعدها.
+            </div>
+            {isAdmin && (
+              <button onClick={runEngineNow} disabled={running} style={{ background: "rgba(16,185,129,0.2)", color: "#6EE7B7", padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+                {running ? "جاري الفحص..." : "🔄 فحص الآن"}
+              </button>
+            )}
+          </div>
           {recurring.length === 0
             ? <div style={{ textAlign: "center", padding: "40px 0", color: "#4B5563" }}>لا توجد تاسكات متكررة بعد</div>
             : recurring.map(r => {
@@ -217,6 +242,16 @@ export default function Templates({ user }) {
                         {r.assigned_to && <span>👤 {r.assigned_to}</span>}
                         {proj && <span>📁 {proj.name}</span>}
                         <span>{p.icon} {p.label}</span>
+                      </div>
+                      <div style={{ fontSize: 11, marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ color: "#6B7280" }}>
+                          آخر توليد: {r.last_generated_date ? new Date(String(r.last_generated_date).slice(0,10) + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "short" }) : "لسه مااتولدتش"}
+                        </span>
+                        {r.is_active && (() => {
+                          const nd = nextDueDate(r, cfg);
+                          return nd ? <span style={{ color: "#6EE7B7", fontWeight: 700 }}>⏭ القادم: {new Date(nd + "T00:00:00").toLocaleDateString("ar-EG", { weekday: "short", day: "numeric", month: "short" })}</span> : null;
+                        })()}
+                        {!r.is_active && <span style={{ color: "#FCD34D", fontWeight: 700 }}>⏸ موقوفة</span>}
                       </div>
                     </div>
                     {isAdmin && (
