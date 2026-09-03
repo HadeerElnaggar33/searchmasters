@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { sb } from "../supabase.js";
+import { loadWorkConfig, isWorkingDay, dayKind, countWorkingDays, monthBounds } from "../workdays.js";
 
 function getTodayStr() {
   const d = new Date();
@@ -29,6 +30,7 @@ export default function Attendance({ user }) {
   const [monthRecords, setMonthRecords] = useState([]);
   const [selectedMember, setSelectedMember] = useState(user.name);
   const [elapsed, setElapsed] = useState(0);
+  const [cfg, setCfg] = useState({ workingDays: [0,1,2,3,4], holidays: [] });
   const timerRef = useRef(null);
   const isAdmin = user.role === "admin" || user.role === "team_leader";
   const today = getTodayStr();
@@ -63,11 +65,13 @@ export default function Attendance({ user }) {
 
   async function loadAll() {
     setLoading(true);
-    const [att, m, sess] = await Promise.all([
+    const [att, m, sess, c] = await Promise.all([
       sb(`attendance?date=eq.${selectedDate}&order=created_at`),
       sb("team_members?is_active=eq.true&order=name"),
       sb(`attendance_sessions?date=eq.${selectedDate}&order=start_time`),
+      loadWorkConfig(),
     ]);
+    if (c) setCfg(c);
     if (att) {
       setAllAttendance(att);
       const my = att.find(a => a.member_name === user.name);
@@ -136,6 +140,17 @@ export default function Attendance({ user }) {
     await loadAll();
   }
 
+  // ── تسجيل / إلغاء إجازة (المدير فقط) ──
+  async function markLeave(memberName) {
+    await sb("attendance", "POST", { member_name: memberName, date: selectedDate, status: "leave" });
+    await loadAll();
+  }
+
+  async function unmarkLeave(rec) {
+    await sb(`attendance?id=eq.${rec.id}`, "DELETE");
+    await loadAll();
+  }
+
   // ── حالة العمل الحالية ──
   const myRecord = todayRecord;
   const activeSession = sessions.find(s => s.member_name === user.name && !s.end_time);
@@ -171,6 +186,21 @@ export default function Attendance({ user }) {
           <button onClick={loadMonthly} style={{ background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>📅 تقرير الشهر</button>
         </div>
       </div>
+
+      {/* ── لافتة نوع اليوم ── */}
+      {(() => {
+        const k = dayKind(selectedDate, cfg);
+        if (k.type === "work") return null;
+        return (
+          <div style={{ background: k.type === "holiday" ? "#FFFBEB" : "#F8FAFC", border: `1px solid ${k.type === "holiday" ? "#FDE68A" : "#E2E8F0"}`, borderRadius: 14, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 20 }}>{k.icon}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>{k.label}</div>
+              <div style={{ fontSize: 12, color: "#94A3B8" }}>اليوم ده مش يوم عمل — محدش هيتحسب غايب فيه</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── بطاقة بدء/إيقاف/استكمال/إنهاء ── */}
       {selectedDate === today && (
@@ -252,9 +282,10 @@ export default function Attendance({ user }) {
       {/* ── إحصائيات اليوم ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10, marginBottom: 20 }}>
         {[
-          { l: "حاضر", v: allAttendance.length, c: "#059669", i: "🟢" },
-          { l: "غائب", v: members.length - allAttendance.length, c: "#DC2626", i: "🔴" },
-          { l: "لا يزال يعمل", v: allAttendance.filter(a => !a.clock_out).length, c: "#2563EB", i: "⚡" },
+          { l: "حاضر", v: allAttendance.filter(a => a.status !== "leave").length, c: "#059669", i: "🟢" },
+          { l: "في إجازة", v: allAttendance.filter(a => a.status === "leave").length, c: "#7C3AED", i: "🏖" },
+          { l: isWorkingDay(selectedDate, cfg) ? "غائب" : "عطلة", v: isWorkingDay(selectedDate, cfg) ? (members.length - allAttendance.length) : "—", c: isWorkingDay(selectedDate, cfg) ? "#DC2626" : "#94A3B8", i: isWorkingDay(selectedDate, cfg) ? "🔴" : "🌙" },
+          { l: "لا يزال يعمل", v: allAttendance.filter(a => !a.clock_out && a.status !== "leave").length, c: "#2563EB", i: "⚡" },
           { l: "أنهى العمل", v: allAttendance.filter(a => a.clock_out).length, c: "#059669", i: "✅" },
         ].map(s => (
           <div key={s.l} style={{ background: "#FFFFFF", border: `1px solid ${s.c}22`, borderRadius: 14, padding: "14px 12px", borderTop: `3px solid ${s.c}`, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
@@ -282,7 +313,12 @@ export default function Attendance({ user }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A" }}>{m.name}</div>
                 </div>
-                {rec ? (
+                {rec && rec.status === "leave" ? (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12, color: "#7C3AED", background: "#F5F3FF", border: "1px solid #DDD6FE", padding: "4px 12px", borderRadius: 8, fontWeight: 700 }}>🏖 في إجازة</span>
+                    {isAdmin && <button onClick={() => unmarkLeave(rec)} style={{ background: "none", color: "#94A3B8", fontSize: 12, textDecoration: "underline" }}>إلغاء</button>}
+                  </div>
+                ) : rec ? (
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: "#059669", background: "#ECFDF5", padding: "3px 10px", borderRadius: 8, fontWeight: 600 }}>🟢 {fmtTime(rec.clock_in)}</span>
                     {rec.clock_out
@@ -295,8 +331,15 @@ export default function Attendance({ user }) {
                       <span style={{ fontSize: 12, background: "#EFF6FF", color: "#2563EB", padding: "3px 10px", borderRadius: 8, fontWeight: 700 }}>⏱ {fmtDuration(totalMins)}</span>
                     )}
                   </div>
+                ) : !isWorkingDay(selectedDate, cfg) ? (
+                  <span style={{ fontSize: 12, color: "#94A3B8", background: "#F8FAFC", border: "1px solid #E2E8F0", padding: "4px 12px", borderRadius: 8, fontWeight: 600 }}>
+                    {dayKind(selectedDate, cfg).icon} {dayKind(selectedDate, cfg).label}
+                  </span>
                 ) : (
-                  <span style={{ fontSize: 12, color: "#DC2626", background: "#FEF2F2", padding: "4px 12px", borderRadius: 8, fontWeight: 600 }}>غائب</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12, color: "#DC2626", background: "#FEF2F2", padding: "4px 12px", borderRadius: 8, fontWeight: 600 }}>غائب</span>
+                    {isAdmin && <button onClick={() => markLeave(m.name)} style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#7C3AED", padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600 }}>🏖 تسجيل إجازة</button>}
+                  </div>
                 )}
               </div>
               {/* Sessions breakdown for admin */}
@@ -329,11 +372,23 @@ export default function Attendance({ user }) {
             {monthRecords.length > 0 && (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
-                  {[
-                    { l: "أيام الحضور", v: monthRecords.length, c: "#059669" },
-                    { l: "إجمالي الساعات", v: `${Math.floor(monthRecords.reduce((s,r)=>s+(r.working_minutes||0),0)/60)}س`, c: "#2563EB" },
-                    { l: "متوسط اليوم", v: (() => { const avg = monthRecords.length ? Math.round(monthRecords.reduce((s,r)=>s+(r.working_minutes||0),0)/monthRecords.length) : 0; return `${Math.floor(avg/60)}س ${avg%60}د`; })(), c: "#D97706" },
-                  ].map(s => (
+                  {(() => {
+                    const present = monthRecords.filter(r => r.status !== "leave");
+                    const leaves = monthRecords.filter(r => r.status === "leave").length;
+                    const mb = monthBounds(selectedDate);
+                    const workDays = countWorkingDays(mb.start, mb.end, cfg);
+                    const totalMins = present.reduce((s,r)=>s+(r.working_minutes||0),0);
+                    const avg = present.length ? Math.round(totalMins/present.length) : 0;
+                    const absent = Math.max(0, workDays - present.length - leaves);
+                    return [
+                      { l: "أيام العمل بالشهر", v: workDays, c: "#0F172A" },
+                      { l: "أيام الحضور", v: present.length, c: "#059669" },
+                      { l: "إجازات", v: leaves, c: "#7C3AED" },
+                      { l: "غياب", v: absent, c: absent > 0 ? "#DC2626" : "#94A3B8" },
+                      { l: "إجمالي الساعات", v: `${Math.floor(totalMins/60)}س`, c: "#2563EB" },
+                      { l: "متوسط اليوم", v: `${Math.floor(avg/60)}س ${avg%60}د`, c: "#D97706" },
+                    ];
+                  })().map(s => (
                     <div key={s.l} style={{ background: "#F8FAFC", borderRadius: 12, padding: 14, textAlign: "center", border: "1px solid #E2E8F0" }}>
                       <div style={{ fontSize: 20, fontWeight: 800, color: s.c }}>{s.v}</div>
                       <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>{s.l}</div>
@@ -341,7 +396,12 @@ export default function Attendance({ user }) {
                   ))}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {monthRecords.map(r => (
+                  {monthRecords.map(r => r.status === "leave" ? (
+                    <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#F5F3FF", borderRadius: 10, fontSize: 13, border: "1px solid #DDD6FE" }}>
+                      <span style={{ color: "#0F172A", fontWeight: 500 }}>{new Date(r.date + "T00:00:00").toLocaleDateString("ar-EG", { weekday: "short", day: "numeric", month: "short" })}</span>
+                      <span style={{ color: "#7C3AED", fontWeight: 700 }}>🏖 في إجازة</span>
+                    </div>
+                  ) : (
                     <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#F8FAFC", borderRadius: 10, fontSize: 13, border: "1px solid #F1F5F9" }}>
                       <span style={{ color: "#0F172A", fontWeight: 500 }}>{new Date(r.date + "T00:00:00").toLocaleDateString("ar-EG", { weekday: "short", day: "numeric", month: "short" })}</span>
                       <span style={{ color: "#059669", fontWeight: 600 }}>{fmtTime(r.clock_in)}</span>
