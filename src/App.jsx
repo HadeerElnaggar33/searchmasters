@@ -17,6 +17,7 @@ import Feedback from "./pages/Feedback.jsx";
 import Settings from "./pages/Settings.jsx";
 import Leaves from "./pages/Leaves.jsx";
 import Hours from "./pages/Hours.jsx";
+import Score from "./pages/Score.jsx";
 import { runRecurringEngine } from "./recurring.js";
 
 const NAV = [
@@ -34,6 +35,7 @@ const NAV = [
   { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
   { id: "leaves",     icon: "🏖", label: "الإجازات",    mobileShow: false },
   { id: "hours",      icon: "⏱", label: "الساعات",     mobileShow: false },
+  { id: "score",      icon: "⭐", label: "النقاط",      mobileShow: false },
   { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
@@ -119,6 +121,7 @@ export default function App() {
     settings:   <Settings user={user} />,
     leaves:     <Leaves user={user} />,
     hours:      <Hours user={user} />,
+    score:      <Score user={user} />,
     notifications: <Notifications user={user} />,
   };
 
