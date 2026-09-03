@@ -228,6 +228,21 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── (أ2) إشعارات الفيدباك المتأجلة (اتكتبت بره وقت الشغل) ──
+    const pendingFb = await api("tasks?feedback_notify_pending=eq.true&select=id,title,assigned_to,feedback_positive,feedback_negative");
+    for (const t of pendingFb) {
+      if (t.feedback_positive) {
+        await notifyOnce(t.assigned_to, `فيدباك ${t.id}`, `💙 المدير مبسوط من شغلك في: ${t.title}`);
+      }
+      if (t.feedback_negative) {
+        await notifyOnce(t.assigned_to, `تحسين ${t.id}`, `📌 المدير مش راضي عن «${t.title}» — حاول تحسّنها`);
+      }
+      if (!dryRun) {
+        await api(`tasks?id=eq.${t.id}`, "PATCH", { feedback_notify_pending: false });
+      }
+      notices.push(`🌙 فيدباك متأجل → ${t.assigned_to}: ${t.title}`);
+    }
+
     // ── (ب) التقرير الأسبوعي — كل خميس ──
     let weeklySent = false;
     if (today.getDay() === 4) {
