@@ -13,6 +13,8 @@ export default function Dashboard({ user, onNavigate }) {
   const [members, setMembers] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [notifs, setNotifs] = useState([]);
+  const [eomWinner, setEomWinner] = useState(null);
+  const [myNom, setMyNom] = useState(null);
   const [loading, setLoading] = useState(true);
   const [clockedIn, setClockedIn] = useState(null);
   const today = new Date().toISOString().split("T")[0];
@@ -21,12 +23,16 @@ export default function Dashboard({ user, onNavigate }) {
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const [t, m, a, n] = await Promise.all([
+    const [t, m, a, n, w, nom] = await Promise.all([
       sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&order=created_at.desc`),
       sb("team_members?is_active=eq.true&order=name"),
       sb(`attendance?date=eq.${today}&order=created_at`),
       sb(`notifications?recipient=eq.${encodeURIComponent(user.name)}&order=created_at.desc&limit=10`),
+      sb(`eom_winners?month=eq.${encodeURIComponent(CURRENT_MONTH)}`),
+      sb(`eom_nominations?month=eq.${encodeURIComponent(CURRENT_MONTH)}&member_name=eq.${encodeURIComponent(user.name)}`),
     ]);
+    if (w) setEomWinner(w[0] || null);
+    if (nom) setMyNom(nom[0] || null);
     if (t) setTasks(t);
     if (m) setMembers(m);
     if (a) { setAttendance(a); const my = a.find(x => x.member_name === user.name); if (my?.clock_in && !my?.clock_out) setClockedIn(my); }
@@ -107,6 +113,25 @@ async function clockOut() {
         {statCard("مكتملة", todayTasks.filter(t=>t.status==="completed").length, "#059669", "#ECFDF5", "✅")}
         {statCard("متأخرة", overdue.length, "#DC2626", "#FEF2F2", "🔴")}
         {statCard("عاجلة", urgent.length, "#DC2626", "#FEF2F2", "🚨")}
+      </div>
+
+      {/* موظف الشهر */}
+      <div onClick={() => onNavigate("eom")} style={{ ...C.card, marginBottom: 20, borderTop: "3px solid #D97706", cursor: "pointer", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 30, flexShrink: 0 }}>🏆</div>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 2 }}>موظف الشهر · {CURRENT_MONTH}</div>
+          {eomWinner
+            ? <div style={{ fontSize: 17, fontWeight: 800, color: "#0F172A" }}>{eomWinner.member_name}</div>
+            : <div style={{ fontSize: 14, fontWeight: 700, color: "#94A3B8" }}>لم يتم الاختيار بعد</div>
+          }
+        </div>
+        {myNom?.percentage != null && (
+          <div style={{ textAlign: "center", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 12, padding: "8px 16px", flexShrink: 0 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#2563EB" }}>{myNom.percentage}%</div>
+            <div style={{ fontSize: 10, color: "#94A3B8" }}>نسبة ترشيحك</div>
+          </div>
+        )}
+        <span style={{ fontSize: 12, color: "#2563EB", fontWeight: 600, flexShrink: 0 }}>عرض ←</span>
       </div>
 
       {/* Urgent */}
