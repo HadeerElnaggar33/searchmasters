@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════
 //  Search Masters Workspace — المهمة اليومية
-//  المرحلة 2: توليد التاسكات المتكررة على السيرفر
+//  المرحلة 3: توليد التاسكات المتكررة + التقرير الأسبوعي + التذكيرات
 //  تشتغل كل يوم 6:00 UTC ≈ 9 صباحاً بتوقيت القاهرة
 //
 //  للاختبار بدون كتابة أي بيانات:  /api/cron?dry=1
@@ -121,12 +121,6 @@ export default async function handler(req, res) {
     }
     const cfg = { workingDays, holidays };
 
-    if (rules.length === 0) {
-      return res.status(200).json({
-        ok: true, message: "مفيش قواعد متكررة مفعّلة", created: 0, startedAt,
-      });
-    }
-
     const today = new Date(dateStr(new Date()) + "T00:00:00");
     const todayStr = dateStr(today);
 
@@ -196,16 +190,125 @@ export default async function handler(req, res) {
       log.push(`${rule.title} (${rule.frequency}): ${madeHere} جديدة`);
     }
 
+    // ═══════════════════════════════════════════
+    //  المرحلة 3: التقرير الأسبوعي + التذكيرات
+    // ═══════════════════════════════════════════
+    const notices = [];
+
+    // إشعار بدون تكرار في نفس اليوم
+    async function notifyOnce(recipient, marker, content) {
+      if (!recipient) return false;
+      const dup = await api(
+        `notifications?recipient=eq.${encodeURIComponent(recipient)}` +
+        `&created_at=gte.${todayStr}T00:00:00&content=like.*${encodeURIComponent(marker)}*&select=id`
+      );
+      if (dup.length > 0) { notices.push(`⏭ ${recipient}: ${marker} (اتبعت قبل كده النهارده)`); return false; }
+      if (dryRun) { notices.push(`🧪 ${recipient}: ${marker}`); return true; }
+      await api("notifications", "POST", { recipient, content, type: "info" });
+      notices.push(`✉️ ${recipient}: ${marker}`);
+      return true;
+    }
+
+    const monthName = monthLabel(today);
+    const [members, monthTasks] = await Promise.all([
+      api("team_members?is_active=eq.true&select=name,role"),
+      api(`tasks?month=eq.${encodeURIComponent(monthName)}`),
+    ]);
+    const managers = members.filter(m => m.role === "admin" || m.role === "team_leader");
+
+    const live = monthTasks.filter(t => t.status !== "cancelled");
+    const isOverdue = t => t.due_date && String(t.due_date).slice(0, 10) < todayStr && t.status !== "completed" && t.status !== "cancelled";
+
+    // ── (أ) تنبيه التاسكات المتأخرة — ملخص واحد لكل شخص ──
+    for (const m of members) {
+      const mine = live.filter(t => t.assigned_to === m.name && isOverdue(t));
+      if (mine.length > 0) {
+        await notifyOnce(m.name, "تاسكات متأخرة",
+          `🔴 عندك ${mine.length} تاسك متأخرة: ${mine.slice(0, 3).map(t => t.title).join(" · ")}${mine.length > 3 ? " …" : ""}`);
+      }
+    }
+
+    // ── (ب) التقرير الأسبوعي — كل خميس ──
+    let weeklySent = false;
+    if (today.getDay() === 4) {
+      const weekAgo = dateStr(addDays(today, -7));
+      const doneWeek = live.filter(t => t.completed_at && String(t.completed_at).slice(0, 10) >= weekAgo);
+      const pending = live.filter(t => t.status !== "completed").length;
+      const overdueAll = live.filter(isOverdue).length;
+      const shifted = live.filter(t => (t.shift_count || 0) > 0).length;
+
+      const byMember = {};
+      for (const t of doneWeek) byMember[t.assigned_to] = (byMember[t.assigned_to] || 0) + 1;
+      const top = Object.entries(byMember).sort((a, b) => b[1] - a[1]).slice(0, 3)
+        .map(([n, c]) => `${n} (${c})`).join(" · ") || "—";
+
+      const body =
+        `📊 التقرير الأسبوعي — ${monthName}\n` +
+        `✅ منجز الأسبوع ده: ${doneWeek.length}\n` +
+        `⏳ متبقي: ${pending}\n` +
+        `🔴 متأخر: ${overdueAll}\n` +
+        `⏩ اتأجل: ${shifted}\n` +
+        `🏅 الأعلى إنجازاً: ${top}`;
+
+      for (const m of managers) {
+        if (await notifyOnce(m.name, "التقرير الأسبوعي", body)) weeklySent = true;
+      }
+    }
+
+    // ── (ج) تذكيرات موظف الشهر ──
+    const [winners, noms] = await Promise.all([
+      api("eom_winners?select=month,member_name,delivered,chosen_at"),
+      api(`eom_nominations?month=eq.${encodeURIComponent(monthName)}&select=updated_at`),
+    ]);
+
+    // آخر يومين عمل في الشهر ولسه مفيش فائز
+    const lastDayNum = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    let remainingWorkDays = 0;
+    for (let d = today.getDate(); d <= lastDayNum; d++) {
+      const s2 = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      if (isWorkingDay(s2, cfg)) remainingWorkDays++;
+    }
+    if (remainingWorkDays <= 2 && !winners.some(w => w.month === monthName)) {
+      for (const m of managers) {
+        await notifyOnce(m.name, "اختيار موظف الشهر",
+          `🏆 فاضل ${remainingWorkDays} يوم عمل على آخر الشهر ولسه ما اتحددش موظف الشهر لـ ${monthName}`);
+      }
+    }
+
+    // جائزة عدى عليها شهر ولسه ما اتسلمتش
+    for (const w of winners.filter(x => !x.delivered && x.chosen_at)) {
+      const days = Math.floor((today - new Date(String(w.chosen_at).slice(0, 10) + "T00:00:00")) / 86400000);
+      if (days >= 30) {
+        for (const m of managers) {
+          await notifyOnce(m.name, `جائزة ${w.month}`,
+            `🎁 عدى ${days} يوم على اختيار ${w.member_name} لـ ${w.month} والجائزة لسه ما اتسلمتش`);
+        }
+      }
+    }
+
+    // عدى أسبوعين بدون تحديث الترشيحات
+    if (noms.length > 0) {
+      const newest = noms.map(n => n.updated_at).filter(Boolean).sort().pop();
+      if (newest) {
+        const days = Math.floor((today - new Date(String(newest).slice(0, 10) + "T00:00:00")) / 86400000);
+        if (days >= 14) {
+          for (const m of managers) {
+            await notifyOnce(m.name, "تحديث الترشيحات",
+              `📊 عدى ${days} يوم من غير تحديث لنسب ترشيح موظف الشهر`);
+          }
+        }
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       mode: dryRun ? "🧪 تجريبي — مفيش أي كتابة" : "✅ تنفيذ فعلي",
       date: todayStr,
+      dayName: ["الأحد","الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][today.getDay()],
       isWorkingDay: isWorkingDay(todayStr, cfg),
-      rulesChecked: rules.length,
-      createdCount: created.length,
-      created,
-      skipped,
-      perRule: log,
+      recurring: { rulesChecked: rules.length, createdCount: created.length, created, skipped, perRule: log },
+      weeklyReport: today.getDay() === 4 ? (weeklySent ? "✅ اتبعت" : "اتبعت قبل كده النهارده") : "مش خميس النهارده",
+      notifications: notices,
       startedAt,
     });
   } catch (e) {
