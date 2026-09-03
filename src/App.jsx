@@ -18,6 +18,7 @@ import Settings from "./pages/Settings.jsx";
 import Leaves from "./pages/Leaves.jsx";
 import Hours from "./pages/Hours.jsx";
 import Score from "./pages/Score.jsx";
+import Mood from "./pages/Mood.jsx";
 import { runRecurringEngine } from "./recurring.js";
 
 const NAV = [
@@ -36,6 +37,7 @@ const NAV = [
   { id: "leaves",     icon: "🏖", label: "الإجازات",    mobileShow: false },
   { id: "hours",      icon: "⏱", label: "الساعات",     mobileShow: false },
   { id: "score",      icon: "⭐", label: "النقاط",      mobileShow: false },
+  { id: "mood",       icon: "☀️", label: "صباحك",       mobileShow: false },
   { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
@@ -68,6 +70,17 @@ export default function App() {
     loadNotifs();
     pollRef.current = setInterval(loadNotifs, 10000);
     return () => clearInterval(pollRef.current);
+  }, [user]);
+
+  // ── المود اليومي: يفتح مرة واحدة بس في اليوم ──
+  useEffect(() => {
+    if (!user) return;
+    const key = `sm_mood_${user.name}_${new Date().toISOString().slice(0, 10)}`;
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, "1");
+    const d = new Date().getDay();
+    if (d === 5 || d === 6) return;   // الجمعة والسبت
+    setPage("mood");
   }, [user]);
 
   // ── محرك التاسكات المتكررة: مرة واحدة كل جلسة، بعد فتح الأبلكيشن ──
@@ -122,6 +135,7 @@ export default function App() {
     leaves:     <Leaves user={user} />,
     hours:      <Hours user={user} />,
     score:      <Score user={user} />,
+    mood:       <Mood user={user} onDone={() => setPage("dashboard")} />,
     notifications: <Notifications user={user} />,
   };
 
