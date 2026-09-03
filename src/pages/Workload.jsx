@@ -1,6 +1,16 @@
 import { useState, useEffect } from "react";
 import { sb, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH } from "../supabase.js";
 
+function parseHelpers(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean);
+  return String(val).split(",").map(x => x.trim()).filter(Boolean);
+}
+
+function isOnTask(task, name) {
+  return task.assigned_to === name || parseHelpers(task.helpers).includes(name);
+}
+
 export default function Workload({ user }) {
   const [members, setMembers] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -12,7 +22,7 @@ export default function Workload({ user }) {
   async function loadAll() {
     const [m, t] = await Promise.all([
       sb("team_members?is_active=eq.true&order=name"),
-      sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&status=neq.completed&status=neq.cancelled&order=created_at`),
+      sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&order=created_at`),
     ]);
     if (m) setMembers(m);
     if (t) setTasks(t);
@@ -20,26 +30,35 @@ export default function Workload({ user }) {
   }
 
   function getMemberLoad(name) {
-    const mt = tasks.filter(t => t.assigned_to === name);
+    const all = tasks.filter(t => isOnTask(t, name));
+    const mt = all.filter(t => t.status !== "completed" && t.status !== "cancelled");
+    const completed = all.filter(t => t.status === "completed").length;
+    const helping = mt.filter(t => t.assigned_to !== name).length;
     const urgent = mt.filter(t => t.priority === "urgent").length;
     const high = mt.filter(t => t.priority === "high").length;
     const overdue = mt.filter(t => t.due_date && t.due_date < today).length;
     const inProgress = mt.filter(t => t.status === "in_progress").length;
-    const score = urgent * 4 + high * 2 + overdue * 3 + inProgress;
+
+    // الضغط من المتبقي، ناقص خصم مقابل المنجز (كل تاسكتين منجزتين = نقطة، بحد أقصى 6)
+    const raw = urgent * 4 + high * 2 + overdue * 3 + inProgress;
+    const relief = Math.min(6, Math.floor(completed / 2));
+    const score = Math.max(0, raw - relief);
+
     let level, color, label;
     if (score === 0) { level = 0; color = "#10B981"; label = "خفيف 🟢"; }
     else if (score <= 4) { level = 1; color = "#3B82F6"; label = "عادي 🔵"; }
     else if (score <= 8) { level = 2; color = "#F59E0B"; label = "متوسط 🟡"; }
     else if (score <= 14) { level = 3; color = "#F97316"; label = "عالي 🟠"; }
     else { level = 4; color = "#EF4444"; label = "ضغط شديد 🔴"; }
-    return { tasks: mt, urgent, high, overdue, inProgress, score, level, color, label };
+    return { tasks: mt, completed, helping, urgent, high, overdue, inProgress, raw, relief, score, level, color, label };
   }
 
   if (loading) return <div style={{ textAlign: "center", padding: 60, color: "#6B7280" }}>جاري التحميل...</div>;
 
-  const totalPending = tasks.length;
-  const totalUrgent = tasks.filter(t => t.priority === "urgent").length;
-  const totalOverdue = tasks.filter(t => t.due_date && t.due_date < today).length;
+  const pendingTasks = tasks.filter(t => t.status !== "completed" && t.status !== "cancelled");
+  const totalPending = pendingTasks.length;
+  const totalUrgent = pendingTasks.filter(t => t.priority === "urgent").length;
+  const totalOverdue = pendingTasks.filter(t => t.due_date && t.due_date < today).length;
 
   return (
     <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
@@ -83,12 +102,13 @@ export default function Workload({ user }) {
 
               {/* Stats */}
               <div style={{ padding: "12px 16px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6, marginBottom: 12 }}>
                   {[
-                    { l: "الكل", v: load.tasks.length, c: "#6366F1" },
+                    { l: "متبقي", v: load.tasks.length, c: "#6366F1" },
+                    { l: "منجز", v: load.completed, c: "#10B981" },
                     { l: "عاجلة", v: load.urgent, c: "#EF4444" },
-                    { l: "عالية", v: load.high, c: "#F97316" },
                     { l: "متأخرة", v: load.overdue, c: "#F59E0B" },
+                    { l: "مساعدة", v: load.helping, c: "#8B5CF6" },
                   ].map(s => (
                     <div key={s.l} style={{ textAlign: "center", background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "8px 4px" }}>
                       <div style={{ fontSize: 18, fontWeight: 800, color: s.c }}>{s.v}</div>
@@ -106,6 +126,11 @@ export default function Workload({ user }) {
                   <div style={{ background: "rgba(255,255,255,0.06)", borderRadius: 6, height: 8, overflow: "hidden" }}>
                     <div style={{ width: pct + "%", height: "100%", background: load.color, borderRadius: 6, transition: "width 0.5s" }}></div>
                   </div>
+                  {load.relief > 0 && (
+                    <div style={{ fontSize: 10, color: "#10B981", marginTop: 5 }}>
+                      ✅ اتخصم {load.relief} نقطة من الضغط مقابل {load.completed} تاسك منجزة (الضغط قبل الخصم {load.raw})
+                    </div>
+                  )}
                 </div>
 
                 {/* Tasks list */}
@@ -118,6 +143,7 @@ export default function Workload({ user }) {
                       return (
                         <div key={t.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "6px 10px", borderRight: `2px solid ${isOverdue ? "#EF4444" : s.color}` }}>
                           <span>{s.icon}</span>
+                          {t.assigned_to !== m.name && <span title="مساعدة" style={{ fontSize: 10, color: "#8B5CF6" }}>🤝</span>}
                           <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
                           <span>{p.icon}</span>
                           {isOverdue && <span style={{ color: "#EF4444", fontSize: 10 }}>متأخر</span>}
