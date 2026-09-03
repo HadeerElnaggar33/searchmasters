@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { sb, addHistory, addNotification, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH, MONTHS } from "../supabase.js";
 import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWorkHours } from "../score.js";
 import { speechSupported, createRecognizer, parseTranscript } from "../voice.js";
+import { activeTimer, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTime, fmtDur, fmtClock } from "../timer.js";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
@@ -89,6 +90,10 @@ export default function Tasks({ user }) {
   const [parsed, setParsed] = useState(null);
   const [voiceErr, setVoiceErr] = useState("");
   const recRef = useRef(null);
+  const [timer, setTimer] = useState(null);        // الجلسة الشغالة
+  const [tick, setTick] = useState(0);             // عداد الثواني
+  const [nudge, setNudge] = useState(false);       // تنبيه تشغيل الوقت
+  const nudgeRef = useRef(null);
 
   const isAdmin = user.role === "admin" || user.role === "team_leader";
   const today = getTodayStr();
@@ -107,6 +112,40 @@ export default function Tasks({ user }) {
   };
 
   useEffect(() => { loadAll(); loadWorkHours(); }, [selectedMonth]);
+
+  // ── التايمر الشغال + العداد ──
+  useEffect(() => { activeTimer(user.name).then(setTimer); }, [user.name]);
+
+  useEffect(() => {
+    if (!timer) return;
+    const t = setInterval(() => setTick(x => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [timer]);
+
+  // ── تنبيه: تاسك شغالة والتايمر مقفول ──
+  useEffect(() => {
+    const running = tasks.filter(t => t.assigned_to === user.name && t.status === "in_progress");
+    const needs = running.length > 0 && !timer;
+    setNudge(needs);
+    if (nudgeRef.current) clearInterval(nudgeRef.current);
+    if (needs) {
+      nudgeRef.current = setInterval(() => setNudge(true), 15 * 60 * 1000);
+    }
+    return () => { if (nudgeRef.current) clearInterval(nudgeRef.current); };
+  }, [tasks, timer, user.name]);
+
+  async function toggleTimer(task) {
+    if (timer && String(timer.task_id) === String(task.id)) {
+      await stopTimer(user.name);
+      setTimer(null);
+    } else {
+      const proj = projects.find(p => String(p.id) === String(task.project_id));
+      const t = await startTimer(task, user.name, proj?.name);
+      setTimer(t);
+      setTick(0);
+    }
+    await loadAll();
+  }
 
   // الاحتفال يختفي لوحده بعد 3.5 ثانية
   useEffect(() => {
@@ -207,6 +246,9 @@ export default function Tasks({ user }) {
         points: SCORE.taskComplete, source: "task_complete",
         reason: `إكمال: ${task.title}`, taskId: task.id, by: user.name,
       });
+      if (timer && String(timer.task_id) === String(task.id)) { await stopTimer(user.name); setTimer(null); }
+      const hadTime = await taskHasTime(task.id);
+      if (!hadTime && task.assigned_to === user.name) await noticeClosedWithoutTime(task, user.name);
       if (task.assigned_to === user.name) setCelebrate(`تاسك خلصت 🎉  +${SCORE.taskComplete} نقطة`);
     }
     if (newStatus === "pending_review") await addNotification("هدير", `👁 ${user.name} أرسل للمراجعة: ${task.title}`, "review", task.id);
@@ -531,6 +573,9 @@ export default function Tasks({ user }) {
                           <span style={{ fontSize: 11, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
                           {proj && <span style={{ fontSize: 11, color: "#64748B" }}>📁 {proj.name}</span>}
                           <span style={{ fontSize: 11, color: "#64748B" }}>👤 {task.assigned_to}</span>
+                          {task.total_minutes > 0 && (
+                            <span style={{ fontSize: 11, color: "#64748B" }}>⏱ {fmtDur(task.total_minutes)}</span>
+                          )}
                           {task.rating && (
                             <span style={{ fontSize: 11, background: SCORE.rating[task.rating] > 0 ? "#ECFDF5" : "#FEF2F2", color: SCORE.rating[task.rating] > 0 ? "#059669" : "#DC2626", border: `1px solid ${SCORE.rating[task.rating] > 0 ? "#A7F3D0" : "#FECACA"}`, padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
                               ★ {task.rating}
@@ -743,6 +788,21 @@ export default function Tasks({ user }) {
                   )}
 
                   {/* زرار التقييم — للمدير */}
+                  {/* التايمر */}
+                  {(showDetail.assigned_to === user.name || parseHelpers(showDetail.helpers).includes(user.name)) && showDetail.status !== "completed" && (
+                    <div style={{ marginBottom: 14 }}>
+                      <button onClick={() => toggleTimer(showDetail)}
+                        style={{ width: "100%", background: (timer && String(timer.task_id) === String(showDetail.id)) ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${(timer && String(timer.task_id) === String(showDetail.id)) ? "#FECACA" : "#A7F3D0"}`, color: (timer && String(timer.task_id) === String(showDetail.id)) ? "#DC2626" : "#059669", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>
+                        {(timer && String(timer.task_id) === String(showDetail.id)) ? "⏹ وقّفي الوقت" : "▶️ شغّلي الوقت"}
+                      </button>
+                      {showDetail.total_minutes > 0 && (
+                        <div style={{ fontSize: 11, color: "#64748B", marginTop: 6, textAlign: "center" }}>
+                          الوقت المسجّل على التاسك دي: <b style={{ color: "#0F172A" }}>{fmtDur(showDetail.total_minutes)}</b>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {isAdmin && (
                     <div style={{ marginBottom: 14 }}>
                       <button onClick={() => {
@@ -983,6 +1043,30 @@ export default function Tasks({ user }) {
               {savingRate ? "جاري الحفظ..." : "حفظ ✓"}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ═══ شريط التايمر ═══ */}
+      {timer && (
+        <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 20 }}>⏱</span>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <div style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}>التايمر شغال</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{timer.task_title}</div>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#059669", fontVariantNumeric: "tabular-nums" }}>
+            {fmtClock(Math.floor((Date.now() - new Date(timer.started_at)) / 1000) + tick * 0)}
+          </div>
+          <button onClick={() => toggleTimer({ id: timer.task_id, title: timer.task_title })}
+            style={{ background: "#DC2626", color: "#fff", padding: "7px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>⏹ إيقاف</button>
+        </div>
+      )}
+
+      {nudge && !timer && (
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 14, padding: "11px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 18 }}>⏱</span>
+          <span style={{ flex: 1, minWidth: 150, fontSize: 13, color: "#D97706", fontWeight: 600 }}>ماتنساش تشغّل الوقت على التاسك اللي شغال عليها</span>
+          <button onClick={() => setNudge(false)} style={{ background: "none", color: "#94A3B8", fontSize: 12 }}>إخفاء</button>
         </div>
       )}
 
