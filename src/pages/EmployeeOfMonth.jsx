@@ -478,6 +478,14 @@ export default function EmployeeOfMonth({ user }) {
                   </div>
                 )}
 
+                {isAdmin && notesOf(m.name).length > 0 && (
+                  <div style={{ fontSize: 11, color: "#64748B", marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span>💬 ملاحظات الشهر:</span>
+                    <span style={{ color: "#059669", fontWeight: 700 }}>👍 {notesOf(m.name).filter(n => n.type === "positive").length}</span>
+                    <span style={{ color: "#D97706", fontWeight: 700 }}>⚠️ {notesOf(m.name).filter(n => n.type === "negative").length}</span>
+                  </div>
+                )}
+
                 {isAdmin && <StatsRow name={m.name} />}
               </div>
             );
