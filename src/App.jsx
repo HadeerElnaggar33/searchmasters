@@ -15,6 +15,7 @@ import SeoChecklist from "./pages/SeoChecklist.jsx";
 import EmployeeOfMonth from "./pages/EmployeeOfMonth.jsx";
 import Feedback from "./pages/Feedback.jsx";
 import Settings from "./pages/Settings.jsx";
+import Leaves from "./pages/Leaves.jsx";
 import { runRecurringEngine } from "./recurring.js";
 
 const NAV = [
@@ -30,6 +31,7 @@ const NAV = [
   { id: "feedback",   icon: "💬", label: "الملاحظات",   mobileShow: false },
   { id: "settings",   icon: "⚙️", label: "الإعدادات",   mobileShow: false, adminOnly: true },
   { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
+  { id: "leaves",     icon: "🏖", label: "الإجازات",    mobileShow: false },
   { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
@@ -113,6 +115,7 @@ export default function App() {
     eom:        <EmployeeOfMonth user={user} />,
     feedback:   <Feedback user={user} />,
     settings:   <Settings user={user} />,
+    leaves:     <Leaves user={user} />,
     notifications: <Notifications user={user} />,
   };
 
