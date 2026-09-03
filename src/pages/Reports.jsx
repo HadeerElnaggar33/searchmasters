@@ -1,6 +1,16 @@
 import { useState, useEffect } from "react";
 import { sb, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, MONTHS } from "../supabase.js";
 
+function parseHelpers(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean);
+  return String(val).split(",").map(x => x.trim()).filter(Boolean);
+}
+
+function isOnTask(task, name) {
+  return task.assigned_to === name || parseHelpers(task.helpers).includes(name);
+}
+
 export default function Reports({ user }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -168,8 +178,9 @@ export default function Reports({ user }) {
           {view === "by_member" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {members.map(m => {
-                const mt = tasks.filter(t => t.assigned_to === m.name);
+                const mt = tasks.filter(t => isOnTask(t, m.name));
                 if (mt.length === 0) return null;
+                const helpingMt = mt.filter(t => t.assigned_to !== m.name).length;
                 const done = mt.filter(t => t.status === "completed").length;
                 const overdueMt = mt.filter(t => t.due_date && t.due_date < today && t.status !== "completed").length;
                 const shiftedMt = mt.filter(t => t.shift_count > 0).length;
@@ -185,6 +196,7 @@ export default function Reports({ user }) {
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 12, background: "rgba(99,102,241,0.15)", color: "#A5B4FC", padding: "2px 10px", borderRadius: 8 }}>📋 {mt.length}</span>
                         <span style={{ fontSize: 12, background: "rgba(16,185,129,0.15)", color: "#10B981", padding: "2px 10px", borderRadius: 8 }}>✅ {done}</span>
+                        {helpingMt > 0 && <span style={{ fontSize: 12, background: "rgba(139,92,246,0.15)", color: "#C4B5FD", padding: "2px 10px", borderRadius: 8 }}>🤝 {helpingMt}</span>}
                         {overdueMt > 0 && <span style={{ fontSize: 12, background: "rgba(239,68,68,0.15)", color: "#FCA5A5", padding: "2px 10px", borderRadius: 8 }}>🔴 {overdueMt}</span>}
                         {shiftedMt > 0 && <span style={{ fontSize: 12, background: "rgba(249,115,22,0.15)", color: "#FED7AA", padding: "2px 10px", borderRadius: 8 }}>⏩ {shiftedMt}</span>}
                         <span style={{ fontSize: 13, fontWeight: 800, color: pct >= 80 ? "#10B981" : pct >= 50 ? "#F59E0B" : "#EF4444" }}>{pct}%</span>
@@ -200,6 +212,7 @@ export default function Reports({ user }) {
                         return (
                           <div key={t.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", flexWrap: "wrap" }}>
                             <span style={{ fontSize: 14 }}>{s.icon}</span>
+                            {t.assigned_to !== m.name && <span title="مساعدة" style={{ fontSize: 10, color: "#C4B5FD" }}>🤝</span>}
                             <span style={{ flex: 1, fontSize: 12 }}>{t.title}</span>
                             <span style={{ fontSize: 10 }}>{p.icon}</span>
                             {t.shift_count > 0 && <span style={{ fontSize: 10, color: "#F97316" }}>⏩{t.shift_count}</span>}
