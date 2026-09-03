@@ -20,6 +20,7 @@ import Hours from "./pages/Hours.jsx";
 import Score from "./pages/Score.jsx";
 import Mood from "./pages/Mood.jsx";
 import { runRecurringEngine } from "./recurring.js";
+import { runMotivation } from "./motivation.js";
 
 const NAV = [
   { id: "dashboard",  icon: "🏠", label: "الرئيسية",    mobileShow: true },
@@ -90,6 +91,7 @@ export default function App() {
     const key = "sm_recurring_" + new Date().toISOString().slice(0, 10);
     if (localStorage.getItem(key)) return;
     const t = setTimeout(async () => {
+      await runMotivation(user.name);
       const res = await runRecurringEngine(user.name);
       if (res && !res.error) {
         localStorage.setItem(key, "1");
