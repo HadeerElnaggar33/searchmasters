@@ -24,6 +24,9 @@ export default function Projects({ user }) {
   const [showEdit, setShowEdit] = useState(null);
   const [showAddRes, setShowAddRes] = useState(false);
   const [confirmDeleteRes, setConfirmDeleteRes] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [loading, setLoading] = useState(true);
   const isAdmin = user.role === "admin" || user.role === "team_leader";
 
@@ -286,6 +289,19 @@ export default function Projects({ user }) {
   }
 
   // ── Projects List ──
+  const filtered = projects.filter(p => {
+    if (filterType !== "all" && !parseTypes(p.project_type).includes(filterType)) return false;
+    if (filterStatus !== "all" && p.status !== filterStatus) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const hit = (p.name || "").toLowerCase().includes(q)
+        || (p.client_name || "").toLowerCase().includes(q)
+        || (p.website_url || "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  });
+
   return (
     <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -293,10 +309,30 @@ export default function Projects({ user }) {
         {isAdmin && <button onClick={() => { setForm(emptyForm); setShowAdd(true); }} style={{ background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: "8px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>+ مشروع جديد</button>}
       </div>
 
-      {projects.length === 0
-        ? <div style={{ textAlign: "center", padding: 60, color: "#94A3B8" }}>📭 لا توجد مشاريع بعد</div>
+      {/* الفلاتر */}
+      <div style={{ display: "grid", gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "2fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔎 ابحثي باسم المشروع أو العميل..." style={inp} />
+        <select value={filterType} onChange={e => setFilterType(e.target.value)} style={inp}>
+          <option value="all">كل الأنواع</option>
+          {PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inp}>
+          <option value="all">كل الحالات</option>
+          {PROJECT_STATUSES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+        </select>
+      </div>
+
+      {filtered.length !== projects.length && (
+        <div style={{ fontSize: 12, color: "#64748B", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span>ظهر {filtered.length} من {projects.length} مشروع</span>
+          <button onClick={() => { setSearch(""); setFilterType("all"); setFilterStatus("all"); }} style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600 }}>مسح الفلاتر ✕</button>
+        </div>
+      )}
+
+      {filtered.length === 0
+        ? <div style={{ textAlign: "center", padding: 60, color: "#94A3B8" }}>{projects.length === 0 ? "📭 لا توجد مشاريع بعد" : "🔎 مفيش مشاريع مطابقة للفلاتر"}</div>
         : <div style={{ display: "grid", gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(2,1fr)", gap: 14 }}>
-            {projects.map(p => {
+            {filtered.map(p => {
               const statusConf = PROJECT_STATUSES.find(s => s.v === p.status) || PROJECT_STATUSES[0];
               return (
                 <div key={p.id} onClick={() => openProject(p)} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 18, padding: 18, cursor: "pointer", borderTop: `3px solid ${p.color || "#2563EB"}`, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
