@@ -58,6 +58,24 @@ export async function replaceTaskScore({ member, month, points, source, reason, 
   return await addScore({ member, month, points, source, reason, taskId, by });
 }
 
+// ── استبدال حركة مرتبطة بمرجع عام (زي التقييم اليومي) ──
+//    الـ ref مفتاح بنبنيه إحنا، مثال: daily:2026-09-02:أحمد
+export async function replaceScoreByRef({ member, month, points, source, reason, ref, by }) {
+  if (!ref || !source) return null;
+  await sb(`score_ledger?ref=eq.${encodeURIComponent(ref)}&source=eq.${source}`, "DELETE");
+  if (!points) return null;
+  if (!member) return null;
+  return await sb("score_ledger", "POST", {
+    member_name: member,
+    month: month || monthLabelOf(),
+    points: Number(points),
+    source,
+    reason: reason || null,
+    ref,
+    created_by: by || null,
+  });
+}
+
 // ── مسح كل نقاط تاسك (عند حذفها) ──
 export async function clearTaskScore(taskId) {
   if (!taskId) return;
