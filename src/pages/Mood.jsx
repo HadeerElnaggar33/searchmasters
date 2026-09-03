@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { sb } from "../supabase.js";
+import { todaysMessages } from "../motivation.js";
 
 const GREETINGS = [
   "صباح الفل", "صباح الخير", "يوم سعيد", "أهلاً بيك", "نوّرت", "صباح النور",
@@ -50,6 +51,7 @@ export default function Mood({ user, onDone }) {
   const [choice, setChoice] = useState("");
   const [note, setNote] = useState("");
   const [showManage, setShowManage] = useState(false);
+  const [msgs, setMsgs] = useState([]);
   const [qForm, setQForm] = useState({ text: "", options: "" });
   const [editQ, setEditQ] = useState(null);
 
@@ -64,12 +66,14 @@ export default function Mood({ user, onDone }) {
 
   async function loadAll() {
     setLoading(true);
-    const [q, a] = await Promise.all([
+    const [q, a, mm] = await Promise.all([
       sb("mood_questions?is_active=eq.true&order=sort_order"),
       sb(`mood_answers?member_name=eq.${encodeURIComponent(user.name)}&order=answer_date.desc&limit=40`),
+      todaysMessages(user.name),
     ]);
     if (q) setQuestions(q);
     if (a) setAnswers(a);
+    setMsgs(mm || []);
     setLoading(false);
   }
 
@@ -135,6 +139,18 @@ export default function Mood({ user, onDone }) {
         </div>
         <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.8 }}>{praise}</div>
       </div>
+
+      {/* ═══ رسايل النهاردة ═══ */}
+      {msgs.length > 0 && (
+        <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+          {msgs.map(m => (
+            <div key={m.id} style={{ background: "#FFFFFF", border: `1px solid ${theme.soft}`, borderRadius: 16, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 20 }}>💬</span>
+              <span style={{ fontSize: 14, color: "#0F172A", lineHeight: 1.7, flex: 1 }}>{m.message_text}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ═══ سؤال النهاردة ═══ */}
       {!question ? (
