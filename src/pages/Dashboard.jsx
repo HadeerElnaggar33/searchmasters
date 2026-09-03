@@ -71,7 +71,7 @@ async function clockOut() {
   const todayTasks = isAdmin ? tasks : myTasks;
   const overdue = todayTasks.filter(t => t.due_date && t.due_date.slice(0,10) < today && t.status !== "completed" && t.status !== "cancelled");
   const urgent = todayTasks.filter(t => t.priority === "urgent" && t.status !== "completed" && t.status !== "cancelled");
-  const myAtt = attendance.find(a => a.member_name === user.name);
+  const myAtt = attendance.find(a => a.member_name === user.name && a.status !== "leave");
 
   const statCard = (label, val, color, bg, icon) => (
     <div style={{ ...C.card, borderTop: `3px solid ${color}` }}>
@@ -188,9 +188,11 @@ async function clockOut() {
                     <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0, color: "#fff" }}>{m.name[0]}</div>
                       <span style={{ flex: 1, fontSize: 13, color: "#0F172A", fontWeight: 500 }}>{m.name}</span>
-                      {att
-                        ? <span style={{ fontSize: 11, color: "#059669", fontWeight: 600 }}>{new Date(att.clock_in).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}{att.clock_out ? ` (${Math.floor(att.working_minutes/60)}س)` : " 🟢"}</span>
-                        : <span style={{ fontSize: 11, color: "#94A3B8" }}>لم يسجل</span>
+                      {att && att.status === "leave"
+                        ? <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>🏖 إجازة</span>
+                        : att && att.clock_in
+                          ? <span style={{ fontSize: 11, color: "#059669", fontWeight: 600 }}>{new Date(att.clock_in).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}{att.clock_out ? ` (${Math.floor((att.working_minutes||0)/60)}س)` : " 🟢"}</span>
+                          : <span style={{ fontSize: 11, color: "#94A3B8" }}>لم يسجل</span>
                       }
                     </div>
                   );
