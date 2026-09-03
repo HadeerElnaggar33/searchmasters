@@ -15,6 +15,7 @@ import SeoChecklist from "./pages/SeoChecklist.jsx";
 import EmployeeOfMonth from "./pages/EmployeeOfMonth.jsx";
 import Feedback from "./pages/Feedback.jsx";
 import Settings from "./pages/Settings.jsx";
+import { runRecurringEngine } from "./recurring.js";
 
 const NAV = [
   { id: "dashboard",  icon: "🏠", label: "الرئيسية",    mobileShow: true },
@@ -54,12 +55,29 @@ export default function App() {
   const [notifs, setNotifs] = useState([]);
   const isMobile = useIsMobile();
   const pollRef = useRef();
+  const engineRef = useRef(false);
 
   useEffect(() => {
     if (!user) return;
     loadNotifs();
     pollRef.current = setInterval(loadNotifs, 10000);
     return () => clearInterval(pollRef.current);
+  }, [user]);
+
+  // ── محرك التاسكات المتكررة: مرة واحدة كل جلسة، بعد فتح الأبلكيشن ──
+  useEffect(() => {
+    if (!user || engineRef.current) return;
+    engineRef.current = true;
+    const key = "sm_recurring_" + new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(key)) return;
+    const t = setTimeout(async () => {
+      const res = await runRecurringEngine(user.name);
+      if (res && !res.error) {
+        localStorage.setItem(key, "1");
+        if (res.created > 0) loadNotifs();
+      }
+    }, 3000);
+    return () => clearTimeout(t);
   }, [user]);
 
   async function loadNotifs() {
