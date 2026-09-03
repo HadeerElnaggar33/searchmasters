@@ -19,6 +19,7 @@ import Leaves from "./pages/Leaves.jsx";
 import Hours from "./pages/Hours.jsx";
 import Score from "./pages/Score.jsx";
 import Mood from "./pages/Mood.jsx";
+import Badges from "./pages/Badges.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
 
@@ -39,6 +40,7 @@ const NAV = [
   { id: "hours",      icon: "⏱", label: "الساعات",     mobileShow: false },
   { id: "score",      icon: "⭐", label: "النقاط",      mobileShow: false },
   { id: "mood",       icon: "☀️", label: "صباحك",       mobileShow: false },
+  { id: "badges",     icon: "🏅", label: "الشارات",     mobileShow: false },
   { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
@@ -138,6 +140,7 @@ export default function App() {
     hours:      <Hours user={user} />,
     score:      <Score user={user} />,
     mood:       <Mood user={user} onDone={() => setPage("dashboard")} />,
+    badges:     <Badges user={user} />,
     notifications: <Notifications user={user} />,
   };
 
