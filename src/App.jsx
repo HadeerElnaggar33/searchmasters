@@ -20,6 +20,7 @@ import Hours from "./pages/Hours.jsx";
 import Score from "./pages/Score.jsx";
 import Mood from "./pages/Mood.jsx";
 import Badges from "./pages/Badges.jsx";
+import Draws, { DrawPopup } from "./pages/Draws.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
 
@@ -41,6 +42,7 @@ const NAV = [
   { id: "score",      icon: "⭐", label: "النقاط",      mobileShow: false },
   { id: "mood",       icon: "☀️", label: "صباحك",       mobileShow: false },
   { id: "badges",     icon: "🏅", label: "الشارات",     mobileShow: false },
+  { id: "draws",      icon: "🎁", label: "الجوائز",     mobileShow: false },
   { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
@@ -141,6 +143,7 @@ export default function App() {
     score:      <Score user={user} />,
     mood:       <Mood user={user} onDone={() => setPage("dashboard")} />,
     badges:     <Badges user={user} />,
+    draws:      <Draws user={user} />,
     notifications: <Notifications user={user} />,
   };
 
@@ -208,6 +211,9 @@ export default function App() {
 
   return (
     <div dir="rtl" style={{ minHeight: "100vh", background: "#F8FAFC", fontFamily: "'Segoe UI',Tahoma,Arial,sans-serif", color: "#64748B", display: "flex", flexDirection: "column" }}>
+
+      {/* نافذة السحب — بتظهر لوحدها في أي صفحة */}
+      <DrawPopup user={user} />
 
       {/* HEADER */}
       <header style={{ background: "#FFFFFF", borderBottom: "1px solid #E2E8F0", padding: isMobile ? "0 12px" : "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56, position: "sticky", top: 0, zIndex: 100, flexShrink: 0, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
