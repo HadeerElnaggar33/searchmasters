@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { sb, addHistory, addNotification, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH, MONTHS } from "../supabase.js";
+import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWorkHours } from "../score.js";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
@@ -76,6 +77,11 @@ export default function Tasks({ user }) {
   const [deliverUrl, setDeliverUrl] = useState("");
   const [deliverNote, setDeliverNote] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [workHours, setWorkHours] = useState({ start: 10, end: 18 });
+  const [celebrate, setCelebrate] = useState(null);          // نص الاحتفال
+  const [showRate, setShowRate] = useState(null);            // التاسك اللي بتتقيّم
+  const [rateForm, setRateForm] = useState({ rating: "", positive: "", negative: "" });
+  const [savingRate, setSavingRate] = useState(false);
 
   const isAdmin = user.role === "admin" || user.role === "team_leader";
   const today = getTodayStr();
@@ -93,7 +99,22 @@ export default function Tasks({ user }) {
     width: "100%", direction: "rtl",
   };
 
-  useEffect(() => { loadAll(); }, [selectedMonth]);
+  useEffect(() => { loadAll(); loadWorkHours(); }, [selectedMonth]);
+
+  // الاحتفال يختفي لوحده بعد 3.5 ثانية
+  useEffect(() => {
+    if (!celebrate) return;
+    const t = setTimeout(() => setCelebrate(null), 3500);
+    return () => clearTimeout(t);
+  }, [celebrate]);
+
+  async function loadWorkHours() {
+    const rows = await sb("app_settings?select=key,value");
+    if (rows) {
+      const g = (k, d) => { const r = rows.find(x => x.key === k); return r ? Number(r.value) : d; };
+      setWorkHours({ start: g("work_hour_start", 10), end: g("work_hour_end", 18) });
+    }
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -172,7 +193,15 @@ export default function Tasks({ user }) {
     }
     await sb(`tasks?id=eq.${task.id}`, "PATCH", updates);
     await addHistory(task.id, "status_changed", user.name, `${STATUS_CONFIG[task.status]?.label} → ${STATUS_CONFIG[newStatus]?.label}`);
-    if (newStatus === "completed") await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
+    if (newStatus === "completed") {
+      await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
+      await replaceTaskScore({
+        member: task.assigned_to, month: task.month || monthLabelOf(),
+        points: SCORE.taskComplete, source: "task_complete",
+        reason: `إكمال: ${task.title}`, taskId: task.id, by: user.name,
+      });
+      if (task.assigned_to === user.name) setCelebrate(`تاسك خلصت 🎉  +${SCORE.taskComplete} نقطة`);
+    }
     if (newStatus === "pending_review") await addNotification("هدير", `👁 ${user.name} أرسل للمراجعة: ${task.title}`, "review", task.id);
     await loadAll();
     if (showDetail?.id === task.id) openDetail({ ...task, status: newStatus });
@@ -182,6 +211,12 @@ export default function Tasks({ user }) {
     await sb(`tasks?id=eq.${task.id}`, "PATCH", { status: "completed", completed_at: new Date().toISOString(), delay_reason: delayReason });
     await addHistory(task.id, "completed", user.name, delayReason ? `مكتمل مع تأخير: ${delayReason}` : "مكتمل في الموعد");
     await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
+    await replaceTaskScore({
+      member: task.assigned_to, month: task.month || monthLabelOf(),
+      points: SCORE.taskComplete, source: "task_complete",
+      reason: `إكمال: ${task.title}`, taskId: task.id, by: user.name,
+    });
+    if (task.assigned_to === user.name) setCelebrate(`تاسك خلصت 🎉  +${SCORE.taskComplete} نقطة`);
     setShowDelay(null); setDelayReason(""); await loadAll(); setShowDetail(null);
   }
 
@@ -204,9 +239,76 @@ export default function Tasks({ user }) {
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
   }
 
+  // ═══ حفظ التقييم والفيدباك (للمدير) ═══
+  async function saveRating() {
+    if (!showRate) return;
+    const t = showRate;
+    const owner = t.assigned_to;
+    const month = t.month || monthLabelOf();
+    const rating = rateForm.rating === "" ? null : Number(rateForm.rating);
+    const pos = rateForm.positive.trim();
+    const neg = rateForm.negative.trim();
+    const hadPos = !!(t.feedback_positive || "").trim();
+    setSavingRate(true);
+
+    const live = inWorkHours(workHours.start, workHours.end);
+
+    await sb(`tasks?id=eq.${t.id}`, "PATCH", {
+      rating,
+      feedback_positive: pos || null,
+      feedback_negative: neg || null,
+      feedback_by: (pos || neg) ? user.name : null,
+      feedback_at: (pos || neg) ? new Date().toISOString() : null,
+      feedback_notify_pending: (pos || neg) && !live ? true : false,
+    });
+
+    // نقاط التقييم
+    await replaceTaskScore({
+      member: owner, month, source: "rating",
+      points: rating ? SCORE.rating[rating] : 0,
+      reason: rating ? `تقييم ${rating}/5: ${t.title}` : null,
+      taskId: t.id, by: user.name,
+    });
+
+    // نقاط الفيدباك
+    await replaceTaskScore({
+      member: owner, month, source: "feedback_pos",
+      points: pos ? SCORE.feedbackPos : 0,
+      reason: pos ? `فيدباك إيجابي: ${t.title}` : null,
+      taskId: t.id, by: user.name,
+    });
+    await replaceTaskScore({
+      member: owner, month, source: "feedback_neg",
+      points: neg ? SCORE.feedbackNeg : 0,
+      reason: neg ? `فيدباك سلبي: ${t.title}` : null,
+      taskId: t.id, by: user.name,
+    });
+
+    await addHistory(t.id, "rated", user.name,
+      [rating ? `تقييم ${rating}/5` : null, pos ? "فيدباك إيجابي" : null, neg ? "فيدباك سلبي" : null].filter(Boolean).join(" · ") || "تم التعديل");
+
+    // الإشعار — لحظي في وقت الشغل، وتاني يوم الصبح لو بره الوقت
+    if (live) {
+      if (pos) await addNotification(owner, `💙 المدير مبسوط من شغلك في: ${t.title}`, "info", t.id);
+      if (neg) await addNotification(owner, `📌 المدير مش راضي عن «${t.title}» — حاول تحسّنها`, "info", t.id);
+      if (rating && !pos && !neg) await addNotification(owner, `⭐ تقييم ${rating}/5 على: ${t.title}`, "info", t.id);
+    }
+
+    // الاحتفال: عند الفيدباك الإيجابي الجديد بس
+    if (pos && !hadPos) setCelebrate(`فيدباك إيجابي لـ ${owner} 💙  +${SCORE.feedbackPos} نقطة`);
+
+    setSavingRate(false);
+    setShowRate(null);
+    await loadAll();
+    if (showDetail?.id === t.id) {
+      openDetail({ ...t, rating, feedback_positive: pos || null, feedback_negative: neg || null, feedback_by: (pos || neg) ? user.name : null });
+    }
+  }
+
   async function deleteTask(taskId) {
     await sb(`task_history?task_id=eq.${taskId}`, "DELETE");
     await sb(`task_comments?task_id=eq.${taskId}`, "DELETE");
+    await clearTaskScore(taskId);
     await sb(`tasks?id=eq.${taskId}`, "DELETE");
     setConfirmDelete(null); setShowDetail(null); await loadAll();
   }
@@ -352,6 +454,13 @@ export default function Tasks({ user }) {
                           <span style={{ fontSize: 11, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
                           {proj && <span style={{ fontSize: 11, color: "#64748B" }}>📁 {proj.name}</span>}
                           <span style={{ fontSize: 11, color: "#64748B" }}>👤 {task.assigned_to}</span>
+                          {task.rating && (
+                            <span style={{ fontSize: 11, background: SCORE.rating[task.rating] > 0 ? "#ECFDF5" : "#FEF2F2", color: SCORE.rating[task.rating] > 0 ? "#059669" : "#DC2626", border: `1px solid ${SCORE.rating[task.rating] > 0 ? "#A7F3D0" : "#FECACA"}`, padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                              ★ {task.rating}
+                            </span>
+                          )}
+                          {task.feedback_positive && <span style={{ fontSize: 11 }} title="فيدباك إيجابي">💙</span>}
+                          {task.feedback_negative && <span style={{ fontSize: 11 }} title="محتاج تحسين">📌</span>}
                           {parseHelpers(task.helpers).length > 0 && (
                             <span style={{ fontSize: 11, background: "#F5F3FF", color: "#7C3AED", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
                               🤝 {parseHelpers(task.helpers).join("، ")}
@@ -523,6 +632,55 @@ export default function Tasks({ user }) {
 
                   {isAdmin && <div style={{ marginBottom: 14 }}><button onClick={() => setConfirmDelete(showDetail)} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "7px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>🗑 حذف التاسك</button></div>}
 
+                  {/* ═══ التقييم والفيدباك ═══ */}
+                  {(showDetail.rating || showDetail.feedback_positive || showDetail.feedback_negative) && (
+                    <div style={{ marginBottom: 14 }}>
+                      {showDetail.rating && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 12, color: "#64748B", fontWeight: 600 }}>تقييم الإدارة:</span>
+                          <span style={{ fontSize: 16, letterSpacing: 2 }}>{"★".repeat(showDetail.rating)}<span style={{ color: "#E2E8F0" }}>{"★".repeat(5 - showDetail.rating)}</span></span>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: SCORE.rating[showDetail.rating] > 0 ? "#059669" : "#DC2626" }}>
+                            {SCORE.rating[showDetail.rating] > 0 ? "+" : ""}{SCORE.rating[showDetail.rating]} نقطة
+                          </span>
+                        </div>
+                      )}
+                      {showDetail.feedback_positive && (
+                        <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 10, padding: "8px 12px", marginBottom: 6 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", marginBottom: 3 }}>💙 فيدباك إيجابي</div>
+                          <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{showDetail.feedback_positive}</div>
+                        </div>
+                      )}
+                      {showDetail.feedback_negative && (
+                        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px", marginBottom: 6 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#D97706", marginBottom: 3 }}>📌 محتاج تحسين</div>
+                          <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{showDetail.feedback_negative}</div>
+                        </div>
+                      )}
+                      {showDetail.feedback_by && (
+                        <div style={{ fontSize: 11, color: "#94A3B8" }}>
+                          بواسطة {showDetail.feedback_by}
+                          {showDetail.feedback_at ? ` · ${new Date(showDetail.feedback_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short" })}` : ""}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* زرار التقييم — للمدير */}
+                  {isAdmin && (
+                    <div style={{ marginBottom: 14 }}>
+                      <button onClick={() => {
+                        setRateForm({
+                          rating: showDetail.rating ? String(showDetail.rating) : "",
+                          positive: showDetail.feedback_positive || "",
+                          negative: showDetail.feedback_negative || "",
+                        });
+                        setShowRate(showDetail);
+                      }} style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700, width: "100%" }}>
+                        ⭐ {(showDetail.rating || showDetail.feedback_positive || showDetail.feedback_negative) ? "تعديل التقييم والفيدباك" : "تقييم وفيدباك"}
+                      </button>
+                    </div>
+                  )}
+
                   {(showDetail.deliverable_url || showDetail.deliverable_note) && (
                     <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 12, padding: 12, marginBottom: 14 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", marginBottom: 6 }}>📎 Deliverable</div>
@@ -687,6 +845,101 @@ export default function Tasks({ user }) {
               <button onClick={() => addDeliverable(showDeliver)} style={{ flex: 1, background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>إضافة</button>
               <button onClick={() => setShowDeliver(null)} style={{ flex: 1, background: "#F1F5F9", color: "#64748B", padding: 12, borderRadius: 10, fontSize: 14 }}>إلغاء</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL: التقييم والفيدباك ═══ */}
+      {showRate && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={e => e.target === e.currentTarget && setShowRate(null)}>
+          <div dir="rtl" style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 20, padding: 24, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto", position: "relative", boxShadow: "0 8px 32px rgba(15,23,42,0.12)" }}>
+            <button onClick={() => setShowRate(null)} style={{ position: "absolute", top: 14, left: 14, background: "none", color: "#94A3B8", fontSize: 20 }}>✕</button>
+            <h3 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 800, color: "#0F172A" }}>⭐ تقييم وفيدباك</h3>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 16 }}>{showRate.title} · {showRate.assigned_to}</div>
+
+            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#D97706", marginBottom: 16, lineHeight: 1.6 }}>
+              ⚠️ التقييم والفيدباك <b>بيظهروا لكل الفريق</b>، وبيأثروا على رصيد النقاط على طول.
+            </div>
+
+            {/* التقييم */}
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 6, fontWeight: 600 }}>
+              التقييم <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري، مش لازم كل تاسك</span>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+              <button type="button" onClick={() => setRateForm(f => ({ ...f, rating: "" }))}
+                style={{ padding: "8px 12px", borderRadius: 10, border: `2px solid ${rateForm.rating === "" ? "#64748B" : "#E2E8F0"}`, background: rateForm.rating === "" ? "#F1F5F9" : "#F8FAFC", color: "#64748B", fontSize: 12, fontWeight: rateForm.rating === "" ? 700 : 500 }}>
+                بدون
+              </button>
+              {[1, 2, 3, 4, 5].map(n => {
+                const on = String(n) === rateForm.rating;
+                const pts = SCORE.rating[n];
+                const good = pts > 0;
+                return (
+                  <button key={n} type="button" onClick={() => setRateForm(f => ({ ...f, rating: String(n) }))}
+                    style={{ padding: "8px 10px", borderRadius: 10, border: `2px solid ${on ? (good ? "#059669" : "#DC2626") : "#E2E8F0"}`, background: on ? (good ? "#ECFDF5" : "#FEF2F2") : "#F8FAFC", color: on ? (good ? "#059669" : "#DC2626") : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500, minWidth: 56 }}>
+                    <div style={{ fontSize: 13 }}>{"★".repeat(n)}</div>
+                    <div style={{ fontSize: 10, marginTop: 2 }}>{pts > 0 ? `+${pts}` : pts}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 16 }}>5 = +2 · 4 = +1 · 3 = −1 · 2 = −2 · 1 = −3</div>
+
+            {/* الفيدباك الإيجابي */}
+            <div style={{ fontSize: 12, color: "#059669", marginBottom: 4, fontWeight: 700 }}>💙 فيدباك إيجابي <span style={{ color: "#94A3B8", fontWeight: 400 }}>(+{SCORE.feedbackPos})</span></div>
+            <textarea value={rateForm.positive} onChange={e => setRateForm(f => ({ ...f, positive: e.target.value }))} rows={2}
+              placeholder="اللي عجبك في الشغل ده..." style={{ ...inp, marginBottom: 14, resize: "vertical" }} />
+
+            {/* الفيدباك السلبي */}
+            <div style={{ fontSize: 12, color: "#D97706", marginBottom: 4, fontWeight: 700 }}>📌 محتاج تحسين <span style={{ color: "#94A3B8", fontWeight: 400 }}>({SCORE.feedbackNeg})</span></div>
+            <textarea value={rateForm.negative} onChange={e => setRateForm(f => ({ ...f, negative: e.target.value }))} rows={2}
+              placeholder="اللي محتاج يتحسن — بصياغة واضحة عن الشغل..." style={{ ...inp, marginBottom: 14, resize: "vertical" }} />
+
+            {!inWorkHours(workHours.start, workHours.end) && (rateForm.positive.trim() || rateForm.negative.trim()) && (
+              <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.6 }}>
+                🌙 إحنا بره وقت الشغل ({workHours.start}:00 – {workHours.end}:00) — الإشعار هيوصله <b>تاني يوم الصبح</b> مش دلوقتي.
+              </div>
+            )}
+
+            <button onClick={saveRating} disabled={savingRate}
+              style={{ width: "100%", background: savingRate ? "#94A3B8" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+              {savingRate ? "جاري الحفظ..." : "حفظ ✓"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ الاحتفال ═══ */}
+      {celebrate && (
+        <div onClick={() => setCelebrate(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "auto", background: "rgba(15,23,42,0.25)" }}>
+          <style>{`
+            @keyframes smFly {
+              0%   { transform: translate(0,0) scale(0.4) rotate(0deg); opacity: 0; }
+              15%  { opacity: 1; }
+              100% { transform: translate(var(--dx), var(--dy)) scale(1.15) rotate(var(--rot)); opacity: 0; }
+            }
+            @keyframes smPop {
+              0%   { transform: scale(0.7); opacity: 0; }
+              50%  { transform: scale(1.04); opacity: 1; }
+              100% { transform: scale(1); opacity: 1; }
+            }
+          `}</style>
+          {["🎉","⭐","💙","✨","🎊","🏆","👏","💫","🌟","🎈","✅","💪"].map((emo, i) => {
+            const ang = (i / 12) * Math.PI * 2;
+            return (
+              <span key={i} style={{
+                position: "absolute", fontSize: 30, left: "50%", top: "50%",
+                "--dx": `${Math.cos(ang) * 220}px`,
+                "--dy": `${Math.sin(ang) * 200}px`,
+                "--rot": `${(i % 2 ? 1 : -1) * 240}deg`,
+                animation: `smFly 1.5s ease-out ${i * 0.05}s forwards`,
+              }}>{emo}</span>
+            );
+          })}
+          <div style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 20, padding: "24px 32px", textAlign: "center", boxShadow: "0 12px 40px rgba(15,23,42,0.2)", animation: "smPop 0.4s ease-out forwards", maxWidth: 320 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", lineHeight: 1.7 }}>{celebrate}</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>اضغطي في أي حتة للإخفاء</div>
           </div>
         </div>
       )}
