@@ -27,6 +27,7 @@ export default function EmployeeOfMonth({ user }) {
   const [tasks, setTasks] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [fbNotes, setFbNotes] = useState([]);
   const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
   const [selectedMonth, setSelectedMonth] = useState(CURRENT_MONTH);
   const [loading, setLoading] = useState(true);
@@ -54,7 +55,7 @@ export default function EmployeeOfMonth({ user }) {
   async function loadAll() {
     setLoading(true);
     const r = monthRange(selectedMonth);
-    const [m, n, w, t, a, p, s] = await Promise.all([
+    const [m, n, w, t, a, p, s, fb] = await Promise.all([
       sb("team_members?is_active=eq.true&order=name"),
       sb(`eom_nominations?month=eq.${encodeURIComponent(selectedMonth)}`),
       sb("eom_winners?order=chosen_at.desc"),
@@ -62,7 +63,9 @@ export default function EmployeeOfMonth({ user }) {
       r ? sb(`attendance?date=gte.${r.start}&date=lte.${r.end}`) : Promise.resolve([]),
       sb("projects?order=name"),
       sb("app_settings?key=eq.eom_threshold"),
+      sb(`feedback_notes?month=eq.${encodeURIComponent(selectedMonth)}&order=created_at.desc`),
     ]);
+    setFbNotes(fb || []);
     if (m) setMembers(m);
     if (n) setNoms(n);
     if (w) setWinners(w);
@@ -78,6 +81,10 @@ export default function EmployeeOfMonth({ user }) {
 
   function nomOf(name) {
     return noms.find(n => n.member_name === name) || null;
+  }
+
+  function notesOf(name) {
+    return fbNotes.filter(n => n.member_name === name);
   }
 
   // ── البيانات المساعدة (للمدير فقط) ──
@@ -563,6 +570,29 @@ export default function EmployeeOfMonth({ user }) {
               </div>
 
               <StatsRow name={showNom.name} />
+
+              {/* ملاحظات الشهر على العضو */}
+              <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 12, padding: "10px 12px" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8 }}>
+                  💬 ملاحظات الشهر ({notesOf(showNom.name).length})
+                </div>
+                {notesOf(showNom.name).length === 0
+                  ? <div style={{ fontSize: 12, color: "#94A3B8" }}>مفيش ملاحظات مسجلة على {showNom.name} الشهر ده</div>
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                      {notesOf(showNom.name).map(n => (
+                        <div key={n.id} style={{ background: n.type === "positive" ? "#ECFDF5" : "#FFFBEB", border: `1px solid ${n.type === "positive" ? "#A7F3D0" : "#FDE68A"}`, borderRadius: 8, padding: "6px 10px" }}>
+                          <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6 }}>
+                            {n.type === "positive" ? "👍" : "⚠️"} {n.content}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3 }}>
+                            {new Date(n.created_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short" })}
+                            {n.project_name ? ` · ${n.project_name}` : ""}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                }
+              </div>
 
               <button onClick={saveNomination} disabled={saving} style={{ background: saving ? "#94A3B8" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
                 {saving ? "جاري الحفظ..." : "حفظ الترشيح ✓"}
