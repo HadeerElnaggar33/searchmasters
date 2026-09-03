@@ -7,6 +7,7 @@ const COLORS = ["#2563EB","#7C3AED","#059669","#DC2626","#D97706","#0891B2","#DB
 export default function Team({ user }) {
   const [members, setMembers] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [winners, setWinners] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(true);
   const isAdmin = user.role === "admin" || user.role === "team_leader";
@@ -15,9 +16,14 @@ export default function Team({ user }) {
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const [m, t] = await Promise.all([sb("team_members?order=created_at"), sb("tasks?select=id,assigned_to,status")]);
+    const [m, t, w] = await Promise.all([
+      sb("team_members?order=created_at"),
+      sb("tasks?select=id,assigned_to,status"),
+      sb("eom_winners?select=member_name,month"),
+    ]);
     if (m) setMembers(m);
     if (t) setTasks(t);
+    if (w) setWinners(w);
     setLoading(false);
   }
 
@@ -56,12 +62,20 @@ export default function Team({ user }) {
           const done = mt.filter(t => t.status === "completed").length;
           const pending = mt.filter(t => t.status !== "completed" && t.status !== "cancelled").length;
           const pct = mt.length ? Math.round((done / mt.length) * 100) : 0;
+          const wins = winners.filter(w => w.member_name === m.name).length;
           return (
             <div key={m.id} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 18, padding: 18, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
                 <div style={{ width: 50, height: 50, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, flexShrink: 0, color: "#fff" }}>{m.name[0]}</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A" }}>{m.name}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    {m.name}
+                    {wins > 0 && (
+                      <span title={`فاز بموظف الشهر ${wins} مرة`} style={{ fontSize: 11, background: "#FFFBEB", color: "#D97706", border: "1px solid #FDE68A", padding: "1px 8px", borderRadius: 20, fontWeight: 700 }}>
+                        🏆 {wins}
+                      </span>
+                    )}
+                  </div>
                   {m.email && <div style={{ fontSize: 11, color: "#94A3B8" }}>{m.email}</div>}
                 </div>
                 {isAdmin ? (
