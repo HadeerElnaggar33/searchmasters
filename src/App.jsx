@@ -21,8 +21,10 @@ import Score from "./pages/Score.jsx";
 import Mood from "./pages/Mood.jsx";
 import Badges from "./pages/Badges.jsx";
 import Draws, { DrawPopup } from "./pages/Draws.jsx";
+import Live from "./pages/Live.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
+import { heartbeat } from "./timer.js";
 
 const NAV = [
   { id: "dashboard",  icon: "🏠", label: "الرئيسية",    mobileShow: true },
@@ -31,6 +33,7 @@ const NAV = [
   { id: "calendar",   icon: "📅", label: "التقويم",     mobileShow: true },
   { id: "reports",    icon: "📊", label: "التقارير",    mobileShow: true },
   { id: "workload",   icon: "⚖️", label: "توزيع العمل", mobileShow: false, adminOnly: true },
+  { id: "live",       icon: "👁", label: "متابعة الفريق", mobileShow: false, adminOnly: true },
   { id: "templates",  icon: "⚡", label: "القوالب",     mobileShow: false, adminOnly: true },
   { id: "team",       icon: "👥", label: "الفريق",      mobileShow: false, adminOnly: true },
   { id: "eom",        icon: "🏆", label: "موظف الشهر",  mobileShow: false },
@@ -75,6 +78,14 @@ export default function App() {
     loadNotifs();
     pollRef.current = setInterval(loadNotifs, 10000);
     return () => clearInterval(pollRef.current);
+  }, [user]);
+
+  // ── نبضة التواجد: بتتحدث كل دقيقتين طول ما الأداة مفتوحة ──
+  useEffect(() => {
+    if (!user) return;
+    heartbeat(user.name);
+    const t = setInterval(() => heartbeat(user.name), 120000);
+    return () => clearInterval(t);
   }, [user]);
 
   // ── المود اليومي: يفتح مرة واحدة بس في اليوم ──
@@ -144,6 +155,7 @@ export default function App() {
     mood:       <Mood user={user} onDone={() => setPage("dashboard")} />,
     badges:     <Badges user={user} />,
     draws:      <Draws user={user} />,
+    live:       <Live user={user} />,
     notifications: <Notifications user={user} />,
   };
 
