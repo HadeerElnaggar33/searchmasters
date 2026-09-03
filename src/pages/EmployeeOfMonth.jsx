@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { sb, sbUpload, addNotification, formatDate, MONTHS, CURRENT_MONTH } from "../supabase.js";
+import { loadLedger, totalsFrom } from "../score.js";
 
 const DEFAULT_THRESHOLD = 60;
 
@@ -28,6 +29,7 @@ export default function EmployeeOfMonth({ user }) {
   const [attendance, setAttendance] = useState([]);
   const [projects, setProjects] = useState([]);
   const [fbNotes, setFbNotes] = useState([]);
+  const [ledger, setLedger] = useState([]);
   const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
   const [selectedMonth, setSelectedMonth] = useState(CURRENT_MONTH);
   const [loading, setLoading] = useState(true);
@@ -55,7 +57,7 @@ export default function EmployeeOfMonth({ user }) {
   async function loadAll() {
     setLoading(true);
     const r = monthRange(selectedMonth);
-    const [m, n, w, t, a, p, s, fb] = await Promise.all([
+    const [m, n, w, t, a, p, s, fb, lg] = await Promise.all([
       sb("team_members?is_active=eq.true&order=name"),
       sb(`eom_nominations?month=eq.${encodeURIComponent(selectedMonth)}`),
       sb("eom_winners?order=chosen_at.desc"),
@@ -64,8 +66,10 @@ export default function EmployeeOfMonth({ user }) {
       sb("projects?order=name"),
       sb("app_settings?key=eq.eom_threshold"),
       sb(`feedback_notes?month=eq.${encodeURIComponent(selectedMonth)}&order=created_at.desc`),
+      loadLedger(selectedMonth),
     ]);
     setFbNotes(fb || []);
+    setLedger(lg || []);
     if (m) setMembers(m);
     if (n) setNoms(n);
     if (w) setWinners(w);
@@ -81,6 +85,29 @@ export default function EmployeeOfMonth({ user }) {
 
   function nomOf(name) {
     return noms.find(n => n.member_name === name) || null;
+  }
+
+  // ═══ الرصيد ونسبة النظام ═══
+  const totals = totalsFrom(ledger);
+  const scoreOf = name => totals[name] || 0;
+  const maxScore = Math.max(0, ...racersNames().map(scoreOf));
+
+  function racersNames() {
+    return members.filter(m => m.role !== "admin").map(m => m.name);
+  }
+
+  // نسبة النظام = رصيد العضو ÷ أعلى رصيد في الفريق
+  function systemPct(name) {
+    const v = scoreOf(name);
+    if (maxScore <= 0 || v <= 0) return 0;
+    return Math.round((v / maxScore) * 100);
+  }
+
+  // النسبة المعتمدة = اللي المدير حددها، وإلا نسبة النظام
+  function effectivePct(name) {
+    const n = nomOf(name);
+    if (n && n.percentage != null) return Number(n.percentage);
+    return systemPct(name);
   }
 
   function notesOf(name) {
@@ -109,21 +136,20 @@ export default function EmployeeOfMonth({ user }) {
 
   // ── الترتيب ──
   const ranked = [...racers].sort((a, b) => {
-    const pa = nomOf(a.name)?.percentage;
-    const pb = nomOf(b.name)?.percentage;
-    if (pa == null && pb == null) return a.name.localeCompare(b.name, "ar");
-    if (pa == null) return 1;
-    if (pb == null) return -1;
+    const pa = effectivePct(a.name);
+    const pb = effectivePct(b.name);
     if (pb !== pa) return pb - pa;
+    const sa = scoreOf(a.name), sbv = scoreOf(b.name);
+    if (sbv !== sa) return sbv - sa;
     return a.name.localeCompare(b.name, "ar");
   });
 
   // ── المرشحون الأقوياء ──
   const strong = (() => {
-    const qualified = ranked.filter(m => (nomOf(m.name)?.percentage ?? -1) >= threshold);
+    const qualified = ranked.filter(m => effectivePct(m.name) >= threshold);
     if (qualified.length <= 3) return qualified;
-    const thirdPct = nomOf(qualified[2].name)?.percentage;
-    return qualified.filter((m, i) => i < 3 || nomOf(m.name)?.percentage === thirdPct);
+    const thirdPct = effectivePct(qualified[2].name);
+    return qualified.filter((m, i) => i < 3 || effectivePct(m.name) === thirdPct);
   })();
 
   const monthWinner = winners.find(w => w.month === selectedMonth) || null;
@@ -139,6 +165,8 @@ export default function EmployeeOfMonth({ user }) {
     const pctRaw = nomForm.percentage;
     if (pctRaw === "" || isNaN(Number(pctRaw))) { alert("اكتبي نسبة من 0 إلى 100"); return; }
     const pct = Math.max(0, Math.min(100, Math.round(Number(pctRaw))));
+    const sysPct = systemPct(showNom.name);
+    if (pct < sysPct) { alert(`مينفعش تحت نسبة النظام (${sysPct}%) — النظام حسبها من الرصيد، والتعديل بالزيادة بس`); return; }
     if (!nomForm.reason.trim()) { alert("سبب الترشيح إلزامي"); return; }
     if (!nomForm.improve.trim()) { alert("المطلوب تحسينه إلزامي"); return; }
 
@@ -150,6 +178,9 @@ export default function EmployeeOfMonth({ user }) {
 
     const payload = {
       month: selectedMonth, member_name: name, percentage: pct,
+      system_percentage: sysPct,
+      manual_override: pct > sysPct,
+      score_snapshot: scoreOf(name),
       reason: nomForm.reason.trim(), improve: nomForm.improve.trim(),
       internal_note: nomForm.internal_note, updated_by: user.name,
       updated_at: new Date().toISOString(),
@@ -319,7 +350,7 @@ export default function EmployeeOfMonth({ user }) {
                 </div>
               </div>
               <span style={{ fontSize: 12, background: monthWinner.delivered ? "#ECFDF5" : "#FFFBEB", color: monthWinner.delivered ? "#059669" : "#D97706", border: `1px solid ${monthWinner.delivered ? "#A7F3D0" : "#FDE68A"}`, padding: "4px 12px", borderRadius: 20, fontWeight: 700 }}>
-                {monthWinner.delivered ? "✅ تم تسليم الجائزة" : "⏳ لم تُسلَّم بعد"}
+                {monthWinner.delivered ? "✅ تم تسليم الهدية" : "⏳ لم تُسلَّم بعد"}
               </span>
             </div>
 
@@ -331,7 +362,7 @@ export default function EmployeeOfMonth({ user }) {
             {monthWinner.prize_image_url && (
               <div style={{ marginBottom: 12 }}>
                 {monthWinner.prize_name && <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>🎁 {monthWinner.prize_name}</div>}
-                <img src={monthWinner.prize_image_url} alt="الجائزة" style={{ maxWidth: "100%", height: "auto", display: "block", borderRadius: 12, border: "1px solid #E2E8F0" }} />
+                <img src={monthWinner.prize_image_url} alt="الهدية" style={{ maxWidth: "100%", height: "auto", display: "block", borderRadius: 12, border: "1px solid #E2E8F0" }} />
                 <a href={monthWinner.prize_image_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2563EB", marginTop: 6, display: "inline-block" }}>تحميل الصورة الأصلية ↗</a>
               </div>
             )}
@@ -349,7 +380,7 @@ export default function EmployeeOfMonth({ user }) {
             {isAdmin && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button onClick={toggleDelivered} style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
-                  {monthWinner.delivered ? "↩️ تراجع عن التسليم" : "✅ تم تسليم الجائزة"}
+                  {monthWinner.delivered ? "↩️ تراجع عن التسليم" : "✅ تم تسليم الهدية"}
                 </button>
                 <button onClick={() => setConfirmEdit(true)} style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>✏️ تعديل الاختيار</button>
               </div>
@@ -374,28 +405,29 @@ export default function EmployeeOfMonth({ user }) {
       {racers.some(m => m.name === user.name) && (
         <div style={{ ...card, marginBottom: 16, borderRight: "4px solid #2563EB" }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", marginBottom: 10 }}>📊 ترشيحك هذا الشهر</div>
-          {myNom && myNom.percentage != null ? (
+          {racers.some(m => m.name === user.name) && (myNom?.percentage != null || scoreOf(user.name) !== 0) ? (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                <div style={{ fontSize: 30, fontWeight: 800, color: myNom.percentage >= threshold ? "#059669" : "#2563EB" }}>{myNom.percentage}%</div>
+                <div style={{ fontSize: 30, fontWeight: 800, color: effectivePct(user.name) >= threshold ? "#059669" : "#2563EB" }}>{effectivePct(user.name)}%</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ background: "#F1F5F9", borderRadius: 6, height: 10, overflow: "hidden" }}>
-                    <div style={{ width: myNom.percentage + "%", height: "100%", background: myNom.percentage >= threshold ? "#059669" : "#2563EB", borderRadius: 6, transition: "width 0.5s" }}></div>
+                    <div style={{ width: effectivePct(user.name) + "%", height: "100%", background: effectivePct(user.name) >= threshold ? "#059669" : "#2563EB", borderRadius: 6, transition: "width 0.5s" }}></div>
                   </div>
                   <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>
-                    {myNom.percentage >= threshold ? "🔥 إنت ضمن المرشحين الأقوياء" : `محتاج ${threshold - myNom.percentage}% كمان للوصول لقائمة المرشحين الأقوياء`}
+                    {effectivePct(user.name) >= threshold ? "🔥 إنت ضمن المرشحين الأقوياء" : `محتاج ${threshold - effectivePct(user.name)}% كمان للوصول لقائمة المرشحين الأقوياء`}
+                    {` · رصيدك ${scoreOf(user.name)}`}
                   </div>
                 </div>
               </div>
               <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 10, padding: "8px 12px", marginBottom: 8 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", marginBottom: 3 }}>سبب الترشيح</div>
-                <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{myNom.reason}</div>
+                <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{myNom?.reason || "النسبة محسوبة من رصيد نقاطك"}</div>
               </div>
               <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px" }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#2563EB", marginBottom: 3 }}>المطلوب تحسينه</div>
-                <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{myNom.improve}</div>
+                <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{myNom?.improve || "—"}</div>
               </div>
-              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>آخر تحديث: {myNom.updated_at ? new Date(myNom.updated_at).toLocaleString("ar-EG") : "—"}</div>
+              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>آخر تحديث: {myNom?.updated_at ? new Date(myNom.updated_at).toLocaleString("ar-EG") : "—"}</div>
             </>
           ) : (
             <div style={{ fontSize: 13, color: "#94A3B8" }}>لم يتم التقييم بعد</div>
@@ -423,10 +455,18 @@ export default function EmployeeOfMonth({ user }) {
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>{m.name}</div>
                         <div style={{ fontSize: 11, color: "#94A3B8" }}>{m.job_title}</div>
                       </div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#D97706" }}>{n?.percentage}%</div>
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "#D97706" }}>{effectivePct(m.name)}%</div>
+                        <div style={{ fontSize: 9, color: "#94A3B8" }}>رصيد {scoreOf(m.name)}</div>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6 }}><b style={{ color: "#059669" }}>سبب الترشيح:</b> {n?.reason}</div>
-                    <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6, marginTop: 4 }}><b style={{ color: "#2563EB" }}>المطلوب تحسينه:</b> {n?.improve}</div>
+                    {n?.reason
+                      ? <>
+                          <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6 }}><b style={{ color: "#059669" }}>سبب الترشيح:</b> {n.reason}</div>
+                          <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6, marginTop: 4 }}><b style={{ color: "#2563EB" }}>المطلوب تحسينه:</b> {n.improve}</div>
+                        </>
+                      : <div style={{ fontSize: 11, color: "#94A3B8" }}>وصل هنا برصيده — المدير لسه ما كتبش سبب الترشيح</div>
+                    }
                   </div>
                 );
               })}
@@ -440,8 +480,9 @@ export default function EmployeeOfMonth({ user }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {ranked.map((m, i) => {
             const n = nomOf(m.name);
-            const pct = n?.percentage;
-            const isStrong = (pct ?? -1) >= threshold;
+            const eff = effectivePct(m.name);
+            const isStrong = eff >= threshold;
+            const reviewed = !!(n && n.reason);
             return (
               <div key={m.id} style={{ border: `1px solid ${isStrong ? "#FDE68A" : "#E2E8F0"}`, background: isStrong ? "#FFFBEB" : "#F8FAFC", borderRadius: 14, padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -454,14 +495,19 @@ export default function EmployeeOfMonth({ user }) {
                     </div>
                     <div style={{ fontSize: 11, color: "#94A3B8" }}>{m.job_title}</div>
                   </div>
-                  {pct != null
-                    ? <div style={{ fontSize: 17, fontWeight: 800, color: isStrong ? "#D97706" : "#2563EB" }}>{pct}%</div>
-                    : <div style={{ fontSize: 12, color: "#94A3B8" }}>لم يتم التقييم بعد</div>
-                  }
+                  <div style={{ textAlign: "center", flexShrink: 0 }}>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: isStrong ? "#D97706" : "#2563EB" }}>{eff}%</div>
+                    <div style={{ fontSize: 9, color: "#94A3B8" }}>رصيد {scoreOf(m.name)}</div>
+                  </div>
+                  {n?.manual_override && (
+                    <span title={`النظام حسبها ${n.system_percentage}%`} style={{ fontSize: 10, background: "#FFFBEB", color: "#D97706", border: "1px solid #FDE68A", padding: "1px 8px", borderRadius: 20, fontWeight: 700, flexShrink: 0 }}>
+                      ✏️ يدوي
+                    </span>
+                  )}
                   {isAdmin && (
                     <button onClick={() => {
                       setNomForm({
-                        percentage: n?.percentage != null ? String(n.percentage) : "",
+                        percentage: n?.percentage != null ? String(n.percentage) : String(systemPct(m.name)),
                         reason: n?.reason || "", improve: n?.improve || "", internal_note: n?.internal_note || "",
                       });
                       setShowNom(m);
@@ -469,13 +515,19 @@ export default function EmployeeOfMonth({ user }) {
                   )}
                 </div>
 
-                {pct != null && (
+                {true && (
                   <div style={{ marginTop: 10 }}>
                     <div style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 6, height: 7, overflow: "hidden", marginBottom: 8 }}>
-                      <div style={{ width: pct + "%", height: "100%", background: isStrong ? "#D97706" : "#2563EB", borderRadius: 6 }}></div>
+                      <div style={{ width: eff + "%", height: "100%", background: isStrong ? "#D97706" : "#2563EB", borderRadius: 6 }}></div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6 }}><b style={{ color: "#059669" }}>سبب الترشيح:</b> {n.reason}</div>
-                    <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6, marginTop: 3 }}><b style={{ color: "#2563EB" }}>المطلوب تحسينه:</b> {n.improve}</div>
+                    {reviewed ? (
+                      <>
+                        <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6 }}><b style={{ color: "#059669" }}>سبب الترشيح:</b> {n.reason}</div>
+                        <div style={{ fontSize: 12, color: "#0F172A", lineHeight: 1.6, marginTop: 3 }}><b style={{ color: "#2563EB" }}>المطلوب تحسينه:</b> {n.improve}</div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 11, color: "#94A3B8" }}>النسبة محسوبة من الرصيد — المدير لسه ما كتبش سبب الترشيح</div>
+                    )}
                   </div>
                 )}
 
@@ -532,7 +584,7 @@ export default function EmployeeOfMonth({ user }) {
                     </span>
                   </div>
                   {w.reason && <div style={{ fontSize: 12, color: "#64748B", marginTop: 6, lineHeight: 1.6 }}>{w.reason}</div>}
-                  {w.prize_image_url && <img src={w.prize_image_url} alt="الجائزة" style={{ maxWidth: "100%", height: "auto", display: "block", borderRadius: 10, marginTop: 8, border: "1px solid #E2E8F0" }} />}
+                  {w.prize_image_url && <img src={w.prize_image_url} alt="الهدية" style={{ maxWidth: "100%", height: "auto", display: "block", borderRadius: 10, marginTop: 8, border: "1px solid #E2E8F0" }} />}
                 </div>
               ))}
             </div>
@@ -552,9 +604,35 @@ export default function EmployeeOfMonth({ user }) {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* الرصيد ونسبة النظام */}
+              <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: "#2563EB" }}>{scoreOf(showNom.name)}</div>
+                    <div style={{ fontSize: 10, color: "#94A3B8" }}>الرصيد</div>
+                  </div>
+                  <div style={{ fontSize: 16, color: "#BFDBFE" }}>→</div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: "#2563EB" }}>{systemPct(showNom.name)}%</div>
+                    <div style={{ fontSize: 10, color: "#94A3B8" }}>نسبة النظام</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 120, fontSize: 11, color: "#2563EB", lineHeight: 1.6 }}>
+                    محسوبة من الرصيد ÷ أعلى رصيد في الفريق ({maxScore})
+                  </div>
+                </div>
+              </div>
+
               <div>
-                <div style={label}>نسبة الترشيح (0 – 100) *</div>
-                <input type="number" min="0" max="100" value={nomForm.percentage} onChange={e => setNomForm(f => ({ ...f, percentage: e.target.value }))} placeholder="مثال: 75" style={inp} />
+                <div style={label}>نسبة الترشيح المعتمدة *</div>
+                <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6 }}>
+                  مينفعش تحت {systemPct(showNom.name)}% — التعديل بالزيادة بس، وبيتسجّل إنه يدوي
+                </div>
+                <input type="number" min={systemPct(showNom.name)} max="100" value={nomForm.percentage} onChange={e => setNomForm(f => ({ ...f, percentage: e.target.value }))} style={inp} />
+                {nomForm.percentage !== "" && Number(nomForm.percentage) > systemPct(showNom.name) && (
+                  <div style={{ fontSize: 11, color: "#D97706", marginTop: 6 }}>
+                    ✏️ زيادة {Number(nomForm.percentage) - systemPct(showNom.name)}% فوق حساب النظام — هيتسجّل كتعديل يدوي
+                  </div>
+                )}
               </div>
               <div>
                 <div style={label}>سبب الترشيح * <span style={{ color: "#94A3B8", fontWeight: 400 }}>— يظهر لكل الفريق</span></div>
@@ -651,18 +729,18 @@ export default function EmployeeOfMonth({ user }) {
                 <textarea value={pickForm.reason} onChange={e => setPickForm(f => ({ ...f, reason: e.target.value }))} rows={3} style={{ ...inp, resize: "vertical" }} />
               </div>
               <div>
-                <div style={label}>🎁 صورة الجائزة <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
+                <div style={label}>🎁 صورة الهدية <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
                 <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6 }}>الصورة هتتعرض زي ما هي بالظبط — من غير قص ولا تعديل أبعاد ولا إطارات</div>
                 <input type="file" accept="image/*" onChange={e => setPrizeFile(e.target.files?.[0] || null)} style={{ ...inp, padding: "8px 10px", fontSize: 13 }} />
                 {prizeFile && <div style={{ fontSize: 12, color: "#059669", marginTop: 6 }}>✓ {prizeFile.name}</div>}
               </div>
               <div>
-                <div style={label}>اسم الجائزة <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
+                <div style={label}>اسم الهدية <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
                 <input value={pickForm.prize_name} onChange={e => setPickForm(f => ({ ...f, prize_name: e.target.value }))} style={inp} />
               </div>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#0F172A", cursor: "pointer" }}>
                 <input type="checkbox" checked={pickForm.delivered} onChange={e => setPickForm(f => ({ ...f, delivered: e.target.checked }))} style={{ width: 18, height: 18 }} />
-                تم تسليم الجائزة
+                تم تسليم الهدية
               </label>
               <div>
                 <div style={label}>🔒 ملاحظات داخلية <span style={{ color: "#94A3B8", fontWeight: 400 }}>— للمدير فقط</span></div>
