@@ -16,6 +16,7 @@ import EmployeeOfMonth from "./pages/EmployeeOfMonth.jsx";
 import Feedback from "./pages/Feedback.jsx";
 import Settings from "./pages/Settings.jsx";
 import Leaves from "./pages/Leaves.jsx";
+import Hours from "./pages/Hours.jsx";
 import { runRecurringEngine } from "./recurring.js";
 
 const NAV = [
@@ -32,6 +33,7 @@ const NAV = [
   { id: "settings",   icon: "⚙️", label: "الإعدادات",   mobileShow: false, adminOnly: true },
   { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
   { id: "leaves",     icon: "🏖", label: "الإجازات",    mobileShow: false },
+  { id: "hours",      icon: "⏱", label: "الساعات",     mobileShow: false },
   { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
   { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
 ];
@@ -116,6 +118,7 @@ export default function App() {
     feedback:   <Feedback user={user} />,
     settings:   <Settings user={user} />,
     leaves:     <Leaves user={user} />,
+    hours:      <Hours user={user} />,
     notifications: <Notifications user={user} />,
   };
 
