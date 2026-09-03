@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { sb, addHistory, addNotification, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH, MONTHS } from "../supabase.js";
 import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWorkHours } from "../score.js";
+import { speechSupported, createRecognizer, parseTranscript } from "../voice.js";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
@@ -82,6 +83,12 @@ export default function Tasks({ user }) {
   const [showRate, setShowRate] = useState(null);            // التاسك اللي بتتقيّم
   const [rateForm, setRateForm] = useState({ rating: "", positive: "", negative: "" });
   const [savingRate, setSavingRate] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const [voiceErr, setVoiceErr] = useState("");
+  const recRef = useRef(null);
 
   const isAdmin = user.role === "admin" || user.role === "team_leader";
   const today = getTodayStr();
@@ -305,6 +312,69 @@ export default function Tasks({ user }) {
     }
   }
 
+  // ═══ التسجيل الصوتي ═══
+  function startListening() {
+    setVoiceErr("");
+    if (!speechSupported()) {
+      setVoiceErr("المتصفح ده مش بيدعم التسجيل الصوتي. جربي Chrome أو Safari.");
+      return;
+    }
+    const rec = createRecognizer();
+    if (!rec) return;
+    recRef.current = rec;
+    let finalText = "";
+
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const txt = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += txt + " ";
+        else interim += txt;
+      }
+      setTranscript((finalText + interim).trim());
+    };
+    rec.onerror = (e) => {
+      setListening(false);
+      if (e.error === "not-allowed") setVoiceErr("المتصفح رفض الميكروفون — اسمحي بالوصول من إعدادات الموقع.");
+      else if (e.error === "no-speech") setVoiceErr("مسمعتش أي كلام. جربي تاني.");
+      else setVoiceErr("حصلت مشكلة في التسجيل: " + e.error);
+    };
+    rec.onend = () => setListening(false);
+
+    setTranscript("");
+    setParsed(null);
+    setListening(true);
+    try { rec.start(); } catch (err) { setListening(false); }
+  }
+
+  function stopListening() {
+    try { recRef.current?.stop(); } catch (e) { /* تجاهل */ }
+    setListening(false);
+  }
+
+  function analyzeVoice() {
+    if (!transcript.trim()) { setVoiceErr("مفيش كلام اتسجل"); return; }
+    setParsed(parseTranscript(transcript, { projects, members, taskTypes: TASK_TYPES }));
+  }
+
+  function applyVoice() {
+    if (!parsed) return;
+    setForm({
+      ...emptyForm,
+      title: parsed.title || "",
+      project_id: parsed.project_id || "",
+      assigned_to: parsed.assigned_to || user.name,
+      task_type: parsed.task_type || "Keyword Research",
+      priority: parsed.priority || "medium",
+      due_date: parsed.due_date || "",
+      notes: parsed.raw,
+      month: selectedMonth,
+    });
+    setVoiceOpen(false);
+    setTranscript(""); setParsed(null);
+    setShowAdd(true);
+  }
+
   async function deleteTask(taskId) {
     await sb(`task_history?task_id=eq.${taskId}`, "DELETE");
     await sb(`task_comments?task_id=eq.${taskId}`, "DELETE");
@@ -396,9 +466,16 @@ export default function Tasks({ user }) {
             {MONTHS.map(m => <option key={m} value={`${m} ${new Date().getFullYear()}`}>{m} {new Date().getFullYear()}</option>)}
           </select>
           {isAdmin && (
+            <>
+            <button onClick={() => { setTranscript(""); setParsed(null); setVoiceErr(""); setVoiceOpen(true); }}
+              title="سجّلي التاسك بصوتك"
+              style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", color: "#7C3AED", padding: "8px 14px", borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+              🎤
+            </button>
             <button onClick={() => { setForm(emptyForm); setShowAdd(true); }} style={{ background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: "8px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>
               + تاسك جديد
             </button>
+            </>
           )}
         </div>
       </div>
@@ -905,6 +982,93 @@ export default function Tasks({ user }) {
               style={{ width: "100%", background: savingRate ? "#94A3B8" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
               {savingRate ? "جاري الحفظ..." : "حفظ ✓"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL: التسجيل الصوتي ═══ */}
+      {voiceOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 330, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={e => e.target === e.currentTarget && !listening && setVoiceOpen(false)}>
+          <div dir="rtl" style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 20, padding: 24, width: "100%", maxWidth: 500, maxHeight: "92vh", overflowY: "auto", position: "relative", boxShadow: "0 8px 32px rgba(15,23,42,0.12)" }}>
+            <button onClick={() => { stopListening(); setVoiceOpen(false); }} style={{ position: "absolute", top: 14, left: 14, background: "none", color: "#94A3B8", fontSize: 20 }}>✕</button>
+            <h3 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 800, color: "#0F172A" }}>🎤 تاسك بالصوت</h3>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 18, lineHeight: 1.7 }}>
+              اتكلمي عادي بالمصري. مثال: «ضيفي لمريم في إيفست تعديل صفحات الإنجليزي، أولوية عالية، تسليم الأربع»
+            </div>
+
+            {/* زرار التسجيل */}
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <button onClick={listening ? stopListening : startListening}
+                style={{
+                  width: 84, height: 84, borderRadius: "50%",
+                  background: listening ? "linear-gradient(135deg,#EF4444,#DC2626)" : "linear-gradient(135deg,#7C3AED,#2563EB)",
+                  color: "#fff", fontSize: 32, border: "none",
+                  boxShadow: listening ? "0 0 0 8px rgba(239,68,68,0.15)" : "0 4px 14px rgba(124,58,237,0.3)",
+                }}>
+                {listening ? "⏹" : "🎤"}
+              </button>
+              <div style={{ fontSize: 13, color: listening ? "#DC2626" : "#64748B", marginTop: 10, fontWeight: listening ? 700 : 500 }}>
+                {listening ? "بسمعك... اضغطي لما تخلصي" : "اضغطي وابدأي الكلام"}
+              </div>
+            </div>
+
+            {voiceErr && (
+              <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "#DC2626", marginBottom: 14, lineHeight: 1.6 }}>
+                ⚠️ {voiceErr}
+              </div>
+            )}
+
+            {/* النص */}
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>الكلام المكتوب <span style={{ color: "#94A3B8", fontWeight: 400 }}>— تقدري تعدّليه</span></div>
+            <textarea value={transcript} onChange={e => { setTranscript(e.target.value); setParsed(null); }} rows={3}
+              placeholder="هيظهر هنا وإنتي بتتكلمي..." style={{ ...inp, resize: "vertical", marginBottom: 12 }} />
+
+            {!parsed ? (
+              <button onClick={analyzeVoice} disabled={!transcript.trim() || listening}
+                style={{ width: "100%", background: (!transcript.trim() || listening) ? "#CBD5E1" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                حلّلي الكلام ←
+              </button>
+            ) : (
+              <>
+                <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 12, padding: 14, marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", marginBottom: 10 }}>اللي فهمته</div>
+                  {[
+                    { l: "المشروع", v: parsed.project_name, ok: parsed.matched.project },
+                    { l: "المسؤول", v: parsed.assigned_to, ok: parsed.matched.member },
+                    { l: "نوع التاسك", v: parsed.task_type, ok: parsed.matched.type },
+                    { l: "الأولوية", v: parsed.priority ? PRIORITY_CONFIG[parsed.priority]?.label : null, ok: parsed.matched.priority },
+                    { l: "الميعاد", v: parsed.due_date ? formatDate(parsed.due_date) : null, ok: parsed.matched.date },
+                  ].map(x => (
+                    <div key={x.l} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid #E2E8F0" }}>
+                      <span style={{ fontSize: 13 }}>{x.ok ? "✅" : "⚪"}</span>
+                      <span style={{ fontSize: 12, color: "#64748B", minWidth: 70 }}>{x.l}</span>
+                      <span style={{ fontSize: 13, fontWeight: x.ok ? 700 : 400, color: x.ok ? "#0F172A" : "#94A3B8" }}>
+                        {x.v || "مش متحدد — هتختاريه بنفسك"}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ paddingTop: 8 }}>
+                    <div style={{ fontSize: 12, color: "#64748B", marginBottom: 3 }}>العنوان</div>
+                    <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{parsed.title}</div>
+                  </div>
+                </div>
+
+                <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.6 }}>
+                  💡 مش هيتحفظ دلوقتي — هتتفتحلك نافذة التاسك متملية وإنتي تراجعي وتعدّلي وتحفظي.
+                </div>
+
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={applyVoice}
+                    style={{ flex: 1, background: "linear-gradient(135deg,#059669,#047857)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                    افتحي التاسك ✓
+                  </button>
+                  <button onClick={() => { setParsed(null); setTranscript(""); }}
+                    style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 18px", borderRadius: 10, fontSize: 14 }}>
+                    تاني
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
