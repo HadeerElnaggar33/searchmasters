@@ -18,6 +18,8 @@ export default function Reports({ user }) {
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[new Date().getMonth()] + " " + new Date().getFullYear());
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("overview");
+  const [clientProject, setClientProject] = useState("");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => { loadAll(); }, [selectedMonth]);
 
@@ -53,7 +55,7 @@ export default function Reports({ user }) {
 
       {/* View Tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 20, background: "rgba(255,255,255,0.04)", borderRadius: 12, padding: 4 }}>
-        {[["overview","📊 نظرة عامة"],["by_project","📁 حسب المشروع"],["by_member","👤 حسب الموظف"]].map(([v, l]) => (
+        {[["overview","📊 نظرة عامة"],["by_project","📁 حسب المشروع"],["by_member","👤 حسب الموظف"],["client","🧾 تقرير العميل"]].map(([v, l]) => (
           <button key={v} onClick={() => setView(v)} style={{ flex: 1, padding: "8px 6px", borderRadius: 8, border: "none", background: view === v ? "linear-gradient(135deg,#6366F1,#8B5CF6)" : "transparent", color: view === v ? "#fff" : "#9CA3AF", fontSize: 12, fontWeight: view === v ? 700 : 400 }}>{l}</button>
         ))}
       </div>
@@ -173,6 +175,117 @@ export default function Reports({ user }) {
               })()}
             </div>
           )}
+
+          {/* ═══ تقرير العميل ═══ */}
+          {view === "client" && (() => {
+            const proj = projects.find(p => String(p.id) === String(clientProject));
+            const pt = proj ? tasks.filter(t => String(t.project_id) === String(proj.id)) : [];
+            const done = pt.filter(t => t.status === "completed");
+            const ongoing = pt.filter(t => t.status !== "completed" && t.status !== "cancelled");
+
+            function buildText() {
+              const lines = [];
+              lines.push(`تقرير الأعمال — ${proj.name}`);
+              lines.push(selectedMonth);
+              lines.push("");
+              lines.push(`الأعمال المنجزة (${done.length}):`);
+              done.forEach((t, i) => {
+                let l = `${i + 1}. ${t.title}`;
+                if (t.completed_at) l += ` — ${formatDate(t.completed_at.split("T")[0])}`;
+                if (t.deliverable_url) l += `\n   ${t.deliverable_url}`;
+                lines.push(l);
+              });
+              if (ongoing.length) {
+                lines.push("");
+                lines.push(`أعمال جارية (${ongoing.length}):`);
+                ongoing.forEach((t, i) => lines.push(`${i + 1}. ${t.title}`));
+              }
+              return lines.join("\n");
+            }
+
+            async function copyText() {
+              try {
+                await navigator.clipboard.writeText(buildText());
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2500);
+              } catch (e) {
+                alert("المتصفح رفض النسخ — اعملي تحديد للنص ونسخ يدوي");
+              }
+            }
+
+            return (
+              <div>
+                <div style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 12, padding: "10px 14px", fontSize: 12, color: "#A5B4FC", marginBottom: 16, lineHeight: 1.7 }}>
+                  🧾 التقرير ده <b>موجّه للعميل</b> — مفيهوش أسماء أعضاء الفريق، ولا التأخيرات، ولا أسباب التأجيل، ولا أي أرقام داخلية. الأعمال المنجزة وتواريخها والمخرجات بس.
+                </div>
+
+                <select value={clientProject} onChange={e => setClientProject(e.target.value)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#083793", padding: "10px 12px", borderRadius: 10, fontSize: 14, outline: "none", direction: "rtl", width: "100%", marginBottom: 16 }}>
+                  <option value="">— اختاري العميل —</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+
+                {!proj ? (
+                  <div style={{ textAlign: "center", padding: 40, color: "#6B7280", fontSize: 13 }}>اختاري عميل عشان يظهر التقرير</div>
+                ) : pt.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: 40, color: "#6B7280", fontSize: 13 }}>مفيش أعمال على {proj.name} في {selectedMonth}</div>
+                ) : (
+                  <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 16, padding: 20 }}>
+                    <div style={{ textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: 14, marginBottom: 16 }}>
+                      <div style={{ fontSize: 18, fontWeight: 800 }}>{proj.name}</div>
+                      <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 4 }}>تقرير الأعمال — {selectedMonth}</div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 18 }}>
+                      <div style={{ textAlign: "center", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.25)", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontSize: 26, fontWeight: 800, color: "#10B981" }}>{done.length}</div>
+                        <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>عمل منجز</div>
+                      </div>
+                      <div style={{ textAlign: "center", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontSize: 26, fontWeight: 800, color: "#A5B4FC" }}>{ongoing.length}</div>
+                        <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>عمل جارٍ</div>
+                      </div>
+                    </div>
+
+                    {done.length > 0 && (
+                      <div style={{ marginBottom: 18 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#10B981", marginBottom: 10 }}>✅ الأعمال المنجزة</div>
+                        {done.map((t, i) => (
+                          <div key={t.id} style={{ padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 12, color: "#6B7280", minWidth: 18 }}>{i + 1}.</span>
+                              <span style={{ flex: 1, fontSize: 13, minWidth: 140 }}>{t.title}</span>
+                              {t.completed_at && <span style={{ fontSize: 11, color: "#6B7280" }}>{formatDate(t.completed_at.split("T")[0])}</span>}
+                            </div>
+                            {t.deliverable_url && (
+                              <a href={t.deliverable_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#A5B4FC", marginRight: 26, display: "inline-block", marginTop: 4, wordBreak: "break-all" }}>
+                                🔗 عرض المخرج
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {ongoing.length > 0 && (
+                      <div style={{ marginBottom: 18 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#A5B4FC", marginBottom: 10 }}>⏳ أعمال جارية</div>
+                        {ongoing.map((t, i) => (
+                          <div key={t.id} style={{ display: "flex", gap: 8, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)", fontSize: 13 }}>
+                            <span style={{ fontSize: 12, color: "#6B7280", minWidth: 18 }}>{i + 1}.</span>
+                            <span style={{ flex: 1, color: "#9CA3AF" }}>{t.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <button onClick={copyText} style={{ width: "100%", background: copied ? "rgba(16,185,129,0.2)" : "linear-gradient(135deg,#6366F1,#8B5CF6)", color: copied ? "#6EE7B7" : "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>
+                      {copied ? "✅ اتنسخ" : "📋 نسخ التقرير كنص"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* By Member */}
           {view === "by_member" && (
