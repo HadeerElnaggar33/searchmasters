@@ -53,7 +53,7 @@ function getFileIcon(url) {
   return "🔗";
 }
 
-export default function Tasks({ user }) {
+export default function Tasks({ user, voiceTrigger }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [members, setMembers] = useState([]);
@@ -148,6 +148,12 @@ export default function Tasks({ user }) {
     }
     await loadAll();
   }
+
+  // فتح نافذة الصوت لما تتضغط أيقونة المايك في البار العلوي
+  useEffect(() => {
+    if (!voiceTrigger) return;
+    setTranscript(""); setParsed(null); setVoiceErr(""); setVoiceOpen(true);
+  }, [voiceTrigger]);
 
   // الاحتفال يختفي لوحده بعد 3.5 ثانية
   useEffect(() => {
@@ -403,6 +409,10 @@ export default function Tasks({ user }) {
 
   function applyVoice() {
     if (!parsed) return;
+    // التاريخ اللي ظهر في «اللي فهمته» يتنقل كامل: اليوم والشهر والسنة
+    const d = parsed.due_date || today;
+    const dt = new Date(d + "T00:00:00");
+    const monthOfDate = isNaN(dt) ? selectedMonth : `${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
     setForm({
       ...emptyForm,
       title: parsed.title || "",
@@ -410,9 +420,10 @@ export default function Tasks({ user }) {
       assigned_to: parsed.assigned_to || user.name,
       task_type: parsed.task_type || "Keyword Research",
       priority: parsed.priority || "medium",
-      due_date: parsed.due_date || "",
+      task_date: d,
+      due_date: d,
       notes: parsed.raw,
-      month: selectedMonth,
+      month: monthOfDate,
     });
     setVoiceOpen(false);
     setTranscript(""); setParsed(null);
