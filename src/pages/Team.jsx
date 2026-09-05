@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { sb } from "../supabase.js";
 
-const ROLES = [{ v:"admin", l:"Admin" },{ v:"team_leader", l:"Team Leader" },{ v:"employee", l:"Employee" }];
+const ROLES = [{ v:"admin", l:"Admin" },{ v:"employee", l:"Employee" }];
 const COLORS = ["#2563EB","#7C3AED","#059669","#DC2626","#D97706","#0891B2","#DB2777","#9333EA","#16A34A","#EA580C"];
 
 export default function Team({ user }) {
@@ -10,7 +10,7 @@ export default function Team({ user }) {
   const [winners, setWinners] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(true);
-  const isAdmin = user.role === "admin" || user.role === "team_leader";
+  const isAdmin = user.role === "admin";
   const [form, setForm] = useState({ name: "", role: "employee", email: "", job_title: "", avatar_color: "#2563EB" });
 
   useEffect(() => { loadAll(); }, []);
