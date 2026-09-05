@@ -75,6 +75,9 @@ export default function App() {
   const [voiceTrigger, setVoiceTrigger] = useState(0);
   const [taskFilter, setTaskFilter] = useState(null);
   const [timer, setTimer] = useState(null);
+  // مؤقت العمل (الحضور) — تعديل ٣
+  const [work, setWork] = useState({ record: null, open: null, doneMins: 0 });
+  const [workBusy, setWorkBusy] = useState(false);
   const [, setTick] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -87,7 +90,82 @@ export default function App() {
     return () => clearInterval(pollRef.current);
   }, [user]);
 
-  // ── تعديل ٣: المؤقت في البار العلوي ──
+  // ── تعديل ٣: مؤقت العمل في البار العلوي ──
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  async function loadWork() {
+    if (!user) return;
+    const [att, sess] = await Promise.all([
+      sb(`attendance?member_name=eq.${encodeURIComponent(user.name)}&date=eq.${todayStr}`),
+      sb(`attendance_sessions?member_name=eq.${encodeURIComponent(user.name)}&date=eq.${todayStr}`),
+    ]);
+    const record = att && att[0] ? att[0] : null;
+    const list = sess || [];
+    const open = list.find(x => !x.end_time) || null;
+    const doneMins = list.reduce((a, x) => a + (Number(x.duration_minutes) || 0), 0);
+    setWork({ record, open, doneMins });
+  }
+
+  useEffect(() => {
+    if (!user) return;
+    loadWork();
+    const t = setInterval(loadWork, 30000);
+    return () => clearInterval(t);
+  }, [user, page]);
+
+  useEffect(() => {
+    if (!work.open) return;
+    const t = setInterval(() => setTick(x => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [work.open]);
+
+  async function startWork() {
+    if (work.record || workBusy) return;
+    setWorkBusy(true);
+    const now = new Date().toISOString();
+    const att = await sb("attendance", "POST", { member_name: user.name, date: todayStr, clock_in: now, status: "present" });
+    if (att && att[0]) {
+      await sb("attendance_sessions", "POST", { attendance_id: att[0].id, member_name: user.name, date: todayStr, start_time: now, type: "work" });
+    }
+    setWorkBusy(false);
+    await loadWork();
+  }
+
+  async function pauseWork() {
+    if (!work.open || workBusy) return;
+    setWorkBusy(true);
+    const now = new Date();
+    const mins = Math.floor((now - new Date(work.open.start_time)) / 60000);
+    await sb(`attendance_sessions?id=eq.${work.open.id}`, "PATCH", { end_time: now.toISOString(), duration_minutes: mins });
+    setWorkBusy(false);
+    await loadWork();
+  }
+
+  async function resumeWork() {
+    if (!work.record || work.open || workBusy) return;
+    setWorkBusy(true);
+    const now = new Date().toISOString();
+    await sb("attendance_sessions", "POST", { attendance_id: work.record.id, member_name: user.name, date: todayStr, start_time: now, type: "work" });
+    setWorkBusy(false);
+    await loadWork();
+  }
+
+  async function endWork() {
+    if (!work.record || workBusy) return;
+    setWorkBusy(true);
+    const now = new Date();
+    if (work.open) {
+      const mins = Math.floor((now - new Date(work.open.start_time)) / 60000);
+      await sb(`attendance_sessions?id=eq.${work.open.id}`, "PATCH", { end_time: now.toISOString(), duration_minutes: mins });
+    }
+    const all = await sb(`attendance_sessions?attendance_id=eq.${work.record.id}`);
+    const total = (all || []).reduce((a, x) => a + (Number(x.duration_minutes) || 0), 0);
+    await sb(`attendance?id=eq.${work.record.id}`, "PATCH", { clock_out: now.toISOString(), working_minutes: total });
+    setWorkBusy(false);
+    await loadWork();
+  }
+
+  // ── تايمر التاسكات في البار العلوي ──
   useEffect(() => {
     if (!user) return;
     const load = () => activeTimer(user.name).then(setTimer).catch(() => {});
@@ -342,7 +420,48 @@ export default function App() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 
-          {/* المؤقت */}
+          {/* ═══ مؤقت العمل (تعديل ٣) ═══ */}
+          {(() => {
+            const running = !!work.open;
+            const liveMins = running ? Math.floor((Date.now() - new Date(work.open.start_time)) / 60000) : 0;
+            const totalSecs = (work.doneMins + liveMins) * 60 +
+              (running ? Math.floor(((Date.now() - new Date(work.open.start_time)) % 60000) / 1000) : 0);
+            const ended = work.record && work.record.clock_out;
+
+            if (!work.record) {
+              return (
+                <button onClick={startWork} disabled={workBusy} title="بدء العمل"
+                  style={{ background: "linear-gradient(135deg,#10B981,#059669)", color: "#fff", padding: isMobile ? "6px 10px" : "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+                  🟢 {isMobile ? "ابدأ" : "بدء العمل"}
+                </button>
+              );
+            }
+            if (ended) {
+              return (
+                <span title="خلصت شغل النهاردة" style={{ fontSize: 11, color: "#059669", background: "#ECFDF5", border: "1px solid #A7F3D0", padding: "5px 11px", borderRadius: 20, fontWeight: 700 }}>
+                  ✅ {fmtClock(work.doneMins * 60)}
+                </span>
+              );
+            }
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: 5, background: running ? "#ECFDF5" : "#FFFBEB", border: `1px solid ${running ? "#A7F3D0" : "#FDE68A"}`, borderRadius: 20, padding: isMobile ? "3px 7px" : "4px 10px" }}>
+                <span style={{ fontSize: 12 }}>{running ? "🟢" : "⏸"}</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: running ? "#059669" : "#D97706", fontVariantNumeric: "tabular-nums" }}>
+                  {fmtClock(totalSecs)}
+                </span>
+                {running
+                  ? <button onClick={pauseWork} disabled={workBusy} title="إيقاف مؤقت"
+                      style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", width: 22, height: 22, borderRadius: "50%", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>⏸</button>
+                  : <button onClick={resumeWork} disabled={workBusy} title="استكمال العمل"
+                      style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", width: 22, height: 22, borderRadius: "50%", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>▶</button>
+                }
+                <button onClick={endWork} disabled={workBusy} title="إنهاء العمل"
+                  style={{ background: "#DC2626", color: "#fff", width: 22, height: 22, borderRadius: "50%", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>🔴</button>
+              </div>
+            );
+          })()}
+
+          {/* تايمر التاسكة */}
           {timer && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 20, padding: isMobile ? "3px 8px" : "4px 12px" }}>
               <span style={{ fontSize: 13 }}>⏱</span>
