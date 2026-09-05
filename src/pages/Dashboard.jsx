@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { sb, STATUS_CONFIG, PRIORITY_CONFIG, timeAgo, formatDate, CURRENT_MONTH } from "../supabase.js";
 import { loadWorkConfig, isWorkingDay, countWorkingDays } from "../workdays.js";
 import { loadLedger, totalsFrom, rankMembers } from "../score.js";
+import { presenceOf } from "../timer.js";
 
 const C = {
   card: { background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 16, padding: "16px 14px", boxShadow: "0 1px 4px rgba(15,23,42,0.06)" },
@@ -34,6 +35,7 @@ export default function Dashboard({ user, onNavigate }) {
   const [notifs, setNotifs] = useState([]);
   const [eomWinner, setEomWinner] = useState(null);
   const [myNom, setMyNom] = useState(null);
+  const [allNoms, setAllNoms] = useState([]);
   const [ledger, setLedger] = useState([]);
   const [myBadges, setMyBadges] = useState([]);
   const [allBadges, setAllBadges] = useState([]);
@@ -44,6 +46,9 @@ export default function Dashboard({ user, onNavigate }) {
   const [gifts, setGifts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [clockedIn, setClockedIn] = useState(null);
+  const [tab, setTab] = useState(() => localStorage.getItem("sm_home_tab") || "mine");
+  const [leaves, setLeaves] = useState([]);
+  const [busy, setBusy] = useState(false);
 
   // قسم صباحك
   const [moodQs, setMoodQs] = useState([]);
@@ -64,13 +69,13 @@ export default function Dashboard({ user, onNavigate }) {
     const yy = new Date().getFullYear();
     const lastD = new Date(yy, new Date().getMonth() + 1, 0).getDate();
 
-    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf] = await Promise.all([
+    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv] = await Promise.all([
       sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&order=created_at.desc`),
       sb("team_members?is_active=eq.true&order=name"),
       sb(`attendance?date=eq.${today}&order=created_at`),
       sb(`notifications?recipient=eq.${encodeURIComponent(user.name)}&order=created_at.desc&limit=10`),
       sb(`eom_winners?month=eq.${encodeURIComponent(CURRENT_MONTH)}`),
-      sb(`eom_nominations?month=eq.${encodeURIComponent(CURRENT_MONTH)}&member_name=eq.${encodeURIComponent(user.name)}`),
+      sb(`eom_nominations?month=eq.${encodeURIComponent(CURRENT_MONTH)}`),
       loadLedger(CURRENT_MONTH),
       sb(`member_badges?member_name=eq.${encodeURIComponent(user.name)}&select=id,badge_id,badge_name,badge_icon,awarded_at`),
       sb("badges?is_active=eq.true&select=id"),
@@ -81,6 +86,7 @@ export default function Dashboard({ user, onNavigate }) {
       sb(`mood_answers?member_name=eq.${encodeURIComponent(user.name)}&answer_date=eq.${today}`),
       sb("day_sentences?is_active=eq.true"),
       sb(`draws?status=eq.won&winner_name=eq.${encodeURIComponent(user.name)}&select=id,gift_name,won_at`),
+      sb("leave_requests?status=eq.pending&order=created_at"),
     ]);
 
     if (t) setTasks(t);
@@ -88,7 +94,7 @@ export default function Dashboard({ user, onNavigate }) {
     if (a) { setAttendance(a); const my = a.find(x => x.member_name === user.name); if (my && my.clock_in && !my.clock_out) setClockedIn(my); }
     if (n) setNotifs(n);
     if (w) setEomWinner(w[0] || null);
-    if (nom) setMyNom(nom[0] || null);
+    if (nom) { setAllNoms(nom); setMyNom(nom.find(x => x.member_name === user.name) || null); }
     setLedger(lg || []);
     if (mb) setMyBadges(mb);
     if (ab) setAllBadges(ab);
@@ -99,6 +105,7 @@ export default function Dashboard({ user, onNavigate }) {
     if (mAns) setMoodToday(mAns[0] || null);
     if (ds) setSentences(ds);
     if (gf) setGifts(gf);
+    if (lv) setLeaves(lv);
     setLoading(false);
   }
 
@@ -124,6 +131,33 @@ export default function Dashboard({ user, onNavigate }) {
     const totalMins = (allSessions || []).reduce((s, x) => s + (x.duration_minutes || 0), 0);
     await sb(`attendance?id=eq.${clockedIn.id}`, "PATCH", { clock_out: now.toISOString(), working_minutes: totalMins });
     setClockedIn(null);
+    await loadAll();
+  }
+
+  function switchTab(v) { setTab(v); localStorage.setItem("sm_home_tab", v); }
+
+  // ── قرارات سريعة من تبويب فريقي ──
+  async function decideLeave(req, ok) {
+    setBusy(true);
+    await sb(`leave_requests?id=eq.${req.id}`, "PATCH", {
+      status: ok ? "approved" : "rejected", decided_by: user.name, decided_at: new Date().toISOString(),
+    });
+    await sb("notifications", "POST", {
+      recipient: req.member_name, type: "info",
+      content: ok ? `✅ إجازتك من ${formatDate(String(req.start_date).slice(0,10))} اتعمدت` : `❌ طلب إجازتك اترفض`,
+    });
+    setBusy(false);
+    await loadAll();
+  }
+
+  async function decideTask(t, ok) {
+    setBusy(true);
+    await sb(`tasks?id=eq.${t.id}`, "PATCH", { status: ok ? "completed" : "needs_revision" });
+    await sb("notifications", "POST", {
+      recipient: t.assigned_to, type: "info", related_task_id: t.id,
+      content: ok ? `✅ تاسك «${t.title}» اتعمدت` : `🔁 تاسك «${t.title}» محتاجة تعديل`,
+    });
+    setBusy(false);
     await loadAll();
   }
 
@@ -227,6 +261,10 @@ export default function Dashboard({ user, onNavigate }) {
   const dueToday = myTasks.filter(t => String(t.due_date || "").slice(0, 10) === today && t.status !== "completed");
 
   const nav = (page, filter) => onNavigate && onNavigate(page, filter);
+  const myNomOf = name => {
+    const r = allNoms.find(x => x.member_name === name);
+    return r && r.percentage != null ? r.percentage : null;
+  };
 
   const StatCard = ({ label, value, color, bg, filter }) => (
     <button onClick={() => nav("tasks", filter)}
@@ -330,6 +368,176 @@ export default function Dashboard({ user, onNavigate }) {
         }
       </div>
 
+      {/* ═══════════ فلتر المدير: شغلي / فريقي (تعديل ١٢) ═══════════ */}
+      {isAdmin && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 16, background: "#F1F5F9", borderRadius: 12, padding: 4 }}>
+          {[["mine", "👤 شغلي"], ["team", "👥 فريقي"]].map(([v, l]) => (
+            <button key={v} onClick={() => switchTab(v)}
+              style={{ flex: 1, padding: "9px 6px", borderRadius: 8, border: "none", background: tab === v ? "#FFFFFF" : "transparent", color: tab === v ? "#0F172A" : "#64748B", fontSize: 13, fontWeight: tab === v ? 700 : 500, boxShadow: tab === v ? "0 1px 3px rgba(15,23,42,0.08)" : "none" }}>
+              {l}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ═══════════ تبويب فريقي ═══════════ */}
+      {isAdmin && tab === "team" && (() => {
+        const teamLive = tasks.filter(t => t.status !== "cancelled");
+        const tOverdue = teamLive.filter(t => t.due_date && String(t.due_date).slice(0,10) < today && t.status !== "completed");
+        const tUrgent  = teamLive.filter(t => t.priority === "urgent" && t.status !== "completed");
+        const tReview  = teamLive.filter(t => t.status === "pending_review");
+        const tProg    = teamLive.filter(t => t.status === "in_progress");
+        const tDone    = teamLive.filter(t => t.status === "completed");
+
+        // مين محتاج متابعة
+        const needFollow = members.map(m => {
+          const late = tOverdue.filter(t => t.assigned_to === m.name).length;
+          const stalled = teamLive.filter(t => t.assigned_to === m.name && t.status === "todo").length;
+          return { m, late, stalled };
+        }).filter(x => x.late > 0).sort((a, b) => b.late - a.late);
+
+        // مين تحت ضغط (من نقاط الضغط أمس)
+        const pressRows = ledger.filter(r => r.source === "pressure");
+
+        return (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(96px,1fr))", gap: 8, marginBottom: 16 }}>
+              <StatCard label="عاجلة"    value={tUrgent.length}  color="#DC2626" bg="#FECACA" filter={{ priority: "urgent" }} />
+              <StatCard label="متأخرة"   value={tOverdue.length} color="#D97706" bg="#FDE68A" filter={{ overdue: true }} />
+              <StatCard label="جارية"    value={tProg.length}    color="#2563EB" bg="#BFDBFE" filter={{ status: "in_progress" }} />
+              <StatCard label="للمراجعة" value={tReview.length}  color="#7C3AED" bg="#DDD6FE" filter={{ status: "pending_review" }} />
+              <StatCard label="مكتملة"   value={tDone.length}    color="#059669" bg="#A7F3D0" filter={{ status: "completed" }} />
+              <StatCard label="الكل"     value={teamLive.length} color="#0F172A" bg="#E2E8F0" filter={{}} />
+            </div>
+
+            {/* مين شغال دلوقتي */}
+            <div style={{ ...C.card, marginBottom: 16 }}>
+              <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>🟢 مين شغال دلوقتي</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 6 }}>
+                {members.map(m => {
+                  const p = presenceOf(m.last_seen, Number(settings.idle_after_minutes) || 180);
+                  const att = attendance.find(a => a.member_name === m.name);
+                  return (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 7, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "7px 10px" }}>
+                      <span style={{ fontSize: 11 }}>{p.icon}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                      <span style={{ fontSize: 10, color: p.color, fontWeight: 700 }}>
+                        {att && att.status === "leave" ? "🏖 إجازة" : p.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* طلبات محتاجة قرار */}
+            {(leaves.length > 0 || tReview.length > 0) && (
+              <div style={{ ...C.card, marginBottom: 16, borderRight: "3px solid #D97706" }}>
+                <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>
+                  ⏳ طلبات محتاجة قرارك ({leaves.length + tReview.length})
+                </div>
+                {leaves.map(r => (
+                  <div key={r.id} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "9px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14 }}>🏖</span>
+                    <div style={{ flex: 1, minWidth: 130 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{r.member_name} · {r.days} يوم</div>
+                      <div style={{ fontSize: 11, color: "#94A3B8" }}>{formatDate(String(r.start_date).slice(0,10))} · {r.reason}</div>
+                    </div>
+                    <button onClick={() => decideLeave(r, true)} disabled={busy} style={{ background: "#059669", color: "#fff", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>اعتماد</button>
+                    <button onClick={() => decideLeave(r, false)} disabled={busy} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>رفض</button>
+                  </div>
+                ))}
+                {tReview.map(t => (
+                  <div key={t.id} style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "9px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14 }}>👀</span>
+                    <div style={{ flex: 1, minWidth: 130 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{t.title}</div>
+                      <div style={{ fontSize: 11, color: "#94A3B8" }}>{t.assigned_to}</div>
+                    </div>
+                    <button onClick={() => decideTask(t, true)} disabled={busy} style={{ background: "#059669", color: "#fff", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>اعتماد</button>
+                    <button onClick={() => decideTask(t, false)} disabled={busy} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>للتعديل</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* مين محتاج متابعة */}
+            {needFollow.length > 0 && (
+              <div style={{ ...C.card, marginBottom: 16, borderRight: "3px solid #DC2626" }}>
+                <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>🔴 مين محتاج متابعة</div>
+                {needFollow.map(({ m, late, stalled }) => (
+                  <button key={m.id} onClick={() => nav("tasks", { overdue: true })}
+                    style={{ width: "100%", textAlign: "right", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 11px", marginBottom: 5, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+                    <span style={{ flex: 1, fontSize: 13, color: "#0F172A" }}>{m.name}</span>
+                    <span style={{ fontSize: 11, color: "#DC2626", fontWeight: 700 }}>{late} متأخرة</span>
+                    {stalled > 0 && <span style={{ fontSize: 11, color: "#94A3B8" }}>{stalled} واقفة</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* مين تحت ضغط */}
+            {pressRows.length > 0 && (
+              <div style={{ ...C.card, marginBottom: 16 }}>
+                <div style={{ fontSize: 14, ...C.heading, marginBottom: 4 }}>💪 مين كان تحت ضغط</div>
+                <div style={C.sub}>للمتابعة بس · إعادة توزيع أو تأجيل تسليم أو تخفيف حمل</div>
+                <div style={{ marginTop: 8 }}>
+                  {pressRows.slice(0, 6).map(r => (
+                    <div key={r.id} style={{ background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 10, padding: "7px 11px", marginBottom: 5, fontSize: 12, color: "#0F172A" }}>
+                      <b>{r.member_name}</b> · {r.reason}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ترتيب الفريق */}
+            <div style={{ ...C.card, marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 14, ...C.heading }}>🏅 ترتيب الفريق</div>
+                <button onClick={() => nav("score")} style={{ background: "none", color: "#2563EB", fontSize: 12, fontWeight: 600 }}>التفاصيل ←</button>
+              </div>
+              {ranked.slice(0, 8).map((n2, i) => {
+                const m = members.find(x => x.name === n2);
+                const nomPct = myNomOf(n2);
+                return (
+                  <div key={n2} style={{ display: "flex", alignItems: "center", gap: 8, background: i === 0 ? "#FFFBEB" : "#F8FAFC", border: `1px solid ${i === 0 ? "#FDE68A" : "#E2E8F0"}`, borderRadius: 10, padding: "7px 11px", marginBottom: 5 }}>
+                    <span style={{ fontSize: 13, minWidth: 20 }}>{["🥇","🥈","🥉"][i] || `${i+1}.`}</span>
+                    <div style={{ width: 24, height: 24, borderRadius: "50%", background: (m && m.avatar_color) || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{n2[0]}</div>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#0F172A" }}>{n2}</span>
+                    {nomPct != null && <span style={{ fontSize: 11, color: "#D97706", fontWeight: 700 }}>{nomPct}%</span>}
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "#2563EB" }}>{Math.round((totals[n2] || 0) * 10) / 10}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* حضور اليوم */}
+            <div style={C.card}>
+              <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>⏰ حضور النهاردة</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 6 }}>
+                {members.map(m => {
+                  const att = attendance.find(a => a.member_name === m.name);
+                  return (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 7, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "7px 10px" }}>
+                      <div style={{ width: 24, height: 24, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                      {att && att.status === "leave"
+                        ? <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>🏖</span>
+                        : att && att.clock_in
+                          ? <span style={{ fontSize: 11, color: "#059669", fontWeight: 600 }}>{new Date(att.clock_in).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</span>
+                          : <span style={{ fontSize: 11, color: "#DC2626" }}>لم يسجل</span>
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
       {/* ═══════════ إنجازاتي هذا الشهر (تعديل ١١ + ١٣) ═══════════ */}
       {!isAdmin && (
         <div style={{ ...C.card, marginBottom: 16, borderTop: "3px solid #7C3AED" }}>
@@ -383,6 +591,7 @@ export default function Dashboard({ user, onNavigate }) {
       )}
 
       {/* ═══════════ كروت الإحصائيات ═══════════ */}
+      {(!isAdmin || tab === "mine") && (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(96px,1fr))", gap: 8, marginBottom: 16 }}>
         <StatCard label="عاجلة"   value={urgent.length}     color="#DC2626" bg="#FECACA" filter={{ priority: "urgent" }} />
         <StatCard label="متأخرة"  value={overdue.length}    color="#D97706" bg="#FDE68A" filter={{ overdue: true }} />
@@ -391,9 +600,10 @@ export default function Dashboard({ user, onNavigate }) {
         <StatCard label="مكتملة"  value={completed.length}  color="#059669" bg="#A7F3D0" filter={{ status: "completed" }} />
         <StatCard label="الكل"    value={live.length}       color="#0F172A" bg="#E2E8F0" filter={{}} />
       </div>
+      )}
 
       {/* ═══════════ العاجلة والمتأخرة ═══════════ */}
-      {(urgent.length > 0 || overdue.length > 0) && (
+      {(!isAdmin || tab === "mine") && (urgent.length > 0 || overdue.length > 0) && (
         <div style={{ ...C.card, marginBottom: 16, borderRight: "3px solid #DC2626" }}>
           <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>🔴 محتاجة انتباه</div>
           {[...urgent, ...overdue.filter(t => !urgent.some(u => u.id === t.id))].slice(0, 6).map(t => {
@@ -413,6 +623,7 @@ export default function Dashboard({ user, onNavigate }) {
       )}
 
       {/* ═══════════ تاسكاتي ═══════════ */}
+      {(!isAdmin || tab === "mine") && (
       <div style={{ ...C.card, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ fontSize: 14, ...C.heading }}>📋 تاسكاتي</div>
@@ -430,8 +641,10 @@ export default function Dashboard({ user, onNavigate }) {
           <div style={{ textAlign: "center", color: "#94A3B8", fontSize: 13, padding: 14 }}>مفيش تاسكات مفتوحة · تمام كده 👏</div>
         )}
       </div>
+      )}
 
       {/* ═══════════ الإشعارات ═══════════ */}
+      {(!isAdmin || tab === "mine") && (
       <div style={{ ...C.card, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ fontSize: 14, ...C.heading }}>🔔 آخر الإشعارات</div>
@@ -447,8 +660,10 @@ export default function Dashboard({ user, onNavigate }) {
           ))
         }
       </div>
+      )}
 
       {/* ═══════════ حضور اليوم ═══════════ */}
+      {!isAdmin && (
       <div style={C.card}>
         <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>⏰ حضور النهاردة</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 6 }}>
@@ -469,6 +684,7 @@ export default function Dashboard({ user, onNavigate }) {
           })}
         </div>
       </div>
+      )}
     </div>
   );
 }
