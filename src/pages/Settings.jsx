@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { sb, MONTHS } from "../supabase.js";
 import { WEEKDAYS, loadWorkConfig, saveWorkingDays, countWorkingDays } from "../workdays.js";
+import { STICKER_CATS, PLACES, SITUATIONS, RATES, parsePlaces, uploadSticker } from "../stickers.js";
+
+const SB_URL = "https://qmucvkzzpeblpkbsgpwd.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFtdWN2a3p6cGVibHBrYnNncHdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0MjI5NjQsImV4cCI6MjEwMTk5ODk2NH0.QNW2_d70XZ_PpNQZvUJOuxSvr7FkZbSpmBPDMmjfYH8";
 
 const TABS = [
   ["calendar",  "📆 تقويم الشغل"],
@@ -8,6 +12,7 @@ const TABS = [
   ["points",    "⭐ النقاط"],
   ["medals",    "🏅 الميداليات"],
   ["content",   "💬 الرسائل والمحتوى"],
+  ["stickers",  "🖼 الاستيكرات"],
   ["team",      "👥 الفريق والصلاحيات"],
   ["recurring", "🔄 التاسكات المتكررة"],
   ["features",  "🎛 تفعيل الميزات"],
@@ -107,6 +112,10 @@ export default function Settings({ user }) {
   const [sentences, setSentences] = useState([]);
   const [moodQs, setMoodQs] = useState([]);
   const [medals, setMedals] = useState([]);
+  const [stickers, setStickers] = useState([]);
+  const [stForm, setStForm] = useState({ name: "", category: "مود", places: ["mood"], situation: "none", rate: "normal", start_date: "", end_date: "" });
+  const [stFile, setStFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const [log, setLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState("");
@@ -127,7 +136,7 @@ export default function Settings({ user }) {
 
   async function load() {
     setLoading(true);
-    const [c, st, m, r, mm, ds, mq, bd, lg] = await Promise.all([
+    const [c, st, m, r, mm, ds, mq, bd, sk, lg] = await Promise.all([
       loadWorkConfig(),
       sb("app_settings?select=key,value"),
       sb("team_members?order=name"),
@@ -136,6 +145,7 @@ export default function Settings({ user }) {
       sb("day_sentences?order=category"),
       sb("mood_questions?order=sort_order"),
       sb("badges?order=category"),
+      sb("stickers?order=created_at.desc"),
       sb("settings_log?order=changed_at.desc&limit=60"),
     ]);
     if (c) { setCfg(c); setDays(c.workingDays); }
@@ -146,6 +156,7 @@ export default function Settings({ user }) {
     if (ds) setSentences(ds);
     if (mq) setMoodQs(mq);
     if (bd) setMedals(bd);
+    if (sk) setStickers(sk);
     if (lg) setLog(lg);
     setLoading(false);
   }
@@ -251,6 +262,38 @@ export default function Settings({ user }) {
     setNewSentence({ text: "", category: "هادية" });
     await load();
   }
+  async function addSticker() {
+    if (!stFile) { alert("اختاري صورة الاستيكر"); return; }
+    if (!stForm.name.trim()) { alert("اكتبي اسم الاستيكر"); return; }
+    if (stForm.places.length === 0) { alert("حددي مكان ظهور واحد على الأقل"); return; }
+    if (stFile.size > 400 * 1024) { alert("الصورة أكبر من 400 كيلوبايت — صغّريها الأول"); return; }
+    setUploading(true);
+    const url = await uploadSticker(stFile, SB_URL, SB_KEY);
+    if (!url) { setUploading(false); alert("الرفع فشل — اتأكدي إن bucket اسمه awards موجود و Public"); return; }
+    await sb("stickers", "POST", {
+      name: stForm.name.trim(), image_url: url, category: stForm.category,
+      places: stForm.places.join(","), situation: stForm.situation, rate: stForm.rate,
+      start_date: stForm.start_date || null, end_date: stForm.end_date || null,
+      created_by: user.name,
+    });
+    await writeLog("إضافة استيكر", "", stForm.name.trim());
+    setStForm({ name: "", category: "مود", places: ["mood"], situation: "none", rate: "normal", start_date: "", end_date: "" });
+    setStFile(null);
+    setUploading(false);
+    flash("✅ اترفع");
+    await load();
+  }
+
+  async function toggleSticker(x) {
+    await sb(`stickers?id=eq.${x.id}`, "PATCH", { is_active: x.is_active === false });
+    await load();
+  }
+  async function delSticker(x) {
+    await sb(`stickers?id=eq.${x.id}`, "DELETE");
+    await writeLog("حذف استيكر", x.name, "");
+    await load();
+  }
+
   async function saveMedal(b, field, value) {
     await sb(`badges?id=eq.${b.id}`, "PATCH", { [field]: value });
     await writeLog(`ميدالية «${b.name}» — ${field}`, b[field], value);
@@ -440,6 +483,103 @@ export default function Settings({ user }) {
               ))}
             </div>
           ))}
+        </>
+      )}
+
+      {tab === "stickers" && (
+        <>
+          <div style={card}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>🖼 رفع استيكر جديد</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 12, lineHeight: 1.7 }}>
+              PNG بخلفية شفافة · مربعة تقريباً · أقل من 400 كيلوبايت<br />
+              يُفضّل استيكرات مصممة للفريق أو من مجموعات مرخصة، تجنباً لمشاكل حقوق الملكية
+            </div>
+
+            <div style={label}>الصورة *</div>
+            <input type="file" accept="image/*" onChange={e => setStFile(e.target.files && e.target.files[0])}
+              style={{ ...inp, padding: "8px 10px", fontSize: 12, marginBottom: 10 }} />
+            {stFile && <div style={{ fontSize: 11, color: "#059669", marginBottom: 10 }}>✓ {stFile.name} · {Math.round(stFile.size / 1024)} ك.ب</div>}
+
+            <div style={label}>الاسم *</div>
+            <input value={stForm.name} onChange={e => setStForm(f => ({ ...f, name: e.target.value }))} placeholder="مثال: مبسوط" style={{ ...inp, marginBottom: 10 }} />
+
+            <div style={label}>التصنيف</div>
+            <select value={stForm.category} onChange={e => setStForm(f => ({ ...f, category: e.target.value }))} style={{ ...inp, marginBottom: 10 }}>
+              {STICKER_CATS.map(c2 => <option key={c2} value={c2}>{c2}</option>)}
+            </select>
+
+            <div style={label}>أماكن الظهور * <span style={{ color: "#94A3B8", fontWeight: 400 }}>— أكتر من اختيار</span></div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {PLACES.map(([v, l]) => {
+                const on = stForm.places.includes(v);
+                return (
+                  <button key={v} onClick={() => setStForm(f => ({ ...f, places: on ? f.places.filter(x => x !== v) : [...f.places, v] }))}
+                    style={{ padding: "6px 12px", borderRadius: 20, border: `2px solid ${on ? "#7C3AED" : "#E2E8F0"}`, background: on ? "#F5F3FF" : "#F8FAFC", color: on ? "#7C3AED" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                    {on ? "✓ " : ""}{l}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={label}>حالة الظهور</div>
+            <select value={stForm.situation} onChange={e => setStForm(f => ({ ...f, situation: e.target.value }))} style={{ ...inp, marginBottom: 10 }}>
+              {SITUATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+
+            <div style={label}>معدل الظهور</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              {RATES.map(([v, l]) => {
+                const on = stForm.rate === v;
+                return (
+                  <button key={v} onClick={() => setStForm(f => ({ ...f, rate: v }))}
+                    style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#EFF6FF" : "#F8FAFC", color: on ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>{l}</button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+              <div><div style={label}>من تاريخ (اختياري)</div><input type="date" value={stForm.start_date} onChange={e => setStForm(f => ({ ...f, start_date: e.target.value }))} style={inp} /></div>
+              <div><div style={label}>إلى تاريخ</div><input type="date" value={stForm.end_date} onChange={e => setStForm(f => ({ ...f, end_date: e.target.value }))} style={inp} /></div>
+            </div>
+
+            <button onClick={addSticker} disabled={uploading}
+              style={{ background: uploading ? "#94A3B8" : "linear-gradient(135deg,#7C3AED,#6D28D9)", color: "#fff", padding: "10px 22px", borderRadius: 10, fontSize: 14, fontWeight: 700 }}>
+              {uploading ? "جاري الرفع..." : "⬆️ ارفعي الاستيكر"}
+            </button>
+          </div>
+
+          {STICKER_CATS.map(cat => {
+            const list = stickers.filter(x => x.category === cat);
+            if (list.length === 0) return null;
+            return (
+              <div key={cat} style={card}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 10 }}>{cat} ({list.length})</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10 }}>
+                  {list.map(x => (
+                    <div key={x.id} style={{ background: x.is_active === false ? "#FEF2F2" : "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 12, padding: 10, textAlign: "center", opacity: x.is_active === false ? 0.6 : 1 }}>
+                      <img src={x.image_url} alt={x.name} style={{ width: 56, height: 56, objectFit: "contain", marginBottom: 6 }} />
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A" }}>{x.name}</div>
+                      <div style={{ fontSize: 9, color: "#94A3B8", marginTop: 2 }}>
+                        {parsePlaces(x.places).length} مكان · {(RATES.find(r => r[0] === x.rate) || [])[1]}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 6 }}>
+                        <button onClick={() => toggleSticker(x)} style={{ background: "none", color: x.is_active === false ? "#DC2626" : "#059669", fontSize: 10, fontWeight: 700 }}>
+                          {x.is_active === false ? "موقوف" : "مفعّل"}
+                        </button>
+                        <button onClick={() => delSticker(x)} style={{ background: "none", color: "#DC2626", fontSize: 11 }}>🗑</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {stickers.length === 0 && (
+            <div style={{ ...card, textAlign: "center", color: "#94A3B8", fontSize: 13, padding: 30 }}>
+              مفيش استيكرات لسه · النظام شغال عادي من غيرها وهيستخدم الإيموجي
+            </div>
+          )}
         </>
       )}
 
