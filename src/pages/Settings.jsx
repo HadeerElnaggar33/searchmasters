@@ -6,6 +6,7 @@ const TABS = [
   ["calendar",  "📆 تقويم الشغل"],
   ["targets",   "🎯 الأهداف والعتبات"],
   ["points",    "⭐ النقاط"],
+  ["medals",    "🏅 الميداليات"],
   ["content",   "💬 الرسائل والمحتوى"],
   ["team",      "👥 الفريق والصلاحيات"],
   ["recurring", "🔄 التاسكات المتكررة"],
@@ -92,6 +93,7 @@ const FEATURES = [
   ["feature_session_points",  "⏱ نقاط الجلسة المتصلة",       "الشغل المتواصل ساعتين أو 4"],
   ["feature_pressure",        "💪 نقاط الضغط اليومي",         "نسبة زيادة على نقاط اليوم الضاغط"],
   ["feature_hour_points",     "🕐 نقاط الساعات",              "نقاط على كل ساعة مسجّلة"],
+  ["feature_medal_points",    "🏅 نقاط الميداليات",           "الميدالية بتضيف نقاط للرصيد"],
 ];
 
 export default function Settings({ user }) {
@@ -104,6 +106,7 @@ export default function Settings({ user }) {
   const [msgs, setMsgs] = useState([]);
   const [sentences, setSentences] = useState([]);
   const [moodQs, setMoodQs] = useState([]);
+  const [medals, setMedals] = useState([]);
   const [log, setLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState("");
@@ -124,7 +127,7 @@ export default function Settings({ user }) {
 
   async function load() {
     setLoading(true);
-    const [c, st, m, r, mm, ds, mq, lg] = await Promise.all([
+    const [c, st, m, r, mm, ds, mq, bd, lg] = await Promise.all([
       loadWorkConfig(),
       sb("app_settings?select=key,value"),
       sb("team_members?order=name"),
@@ -132,6 +135,7 @@ export default function Settings({ user }) {
       sb("motivation_messages?order=trigger_key"),
       sb("day_sentences?order=category"),
       sb("mood_questions?order=sort_order"),
+      sb("badges?order=category"),
       sb("settings_log?order=changed_at.desc&limit=60"),
     ]);
     if (c) { setCfg(c); setDays(c.workingDays); }
@@ -141,6 +145,7 @@ export default function Settings({ user }) {
     if (mm) setMsgs(mm);
     if (ds) setSentences(ds);
     if (mq) setMoodQs(mq);
+    if (bd) setMedals(bd);
     if (lg) setLog(lg);
     setLoading(false);
   }
@@ -246,6 +251,13 @@ export default function Settings({ user }) {
     setNewSentence({ text: "", category: "هادية" });
     await load();
   }
+  async function saveMedal(b, field, value) {
+    await sb(`badges?id=eq.${b.id}`, "PATCH", { [field]: value });
+    await writeLog(`ميدالية «${b.name}» — ${field}`, b[field], value);
+    setMedals(list => list.map(x => x.id === b.id ? { ...x, [field]: value } : x));
+    flash("✅ اتحفظت");
+  }
+
   async function delSentence(x) {
     await sb(`day_sentences?id=eq.${x.id}`, "DELETE");
     await load();
@@ -428,6 +440,70 @@ export default function Settings({ user }) {
               ))}
             </div>
           ))}
+        </>
+      )}
+
+      {tab === "medals" && (
+        <>
+          <div style={card}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 10 }}>⭐ نقاط الدرجات</div>
+            {[
+              ["medal_pts_easy",   "سهلة",      "فئة الهزار غالباً"],
+              ["medal_pts_medium", "متوسطة",    "الأداء والجودة والفريق والالتزام"],
+              ["medal_pts_hard",   "صعبة",      "الإنجازات والتدريب"],
+              ["impact_small",     "أثر بسيط",  "لفئة أثر — تُختار وقت المنح"],
+              ["impact_medium",    "أثر متوسط", ""],
+              ["impact_big",       "أثر كبير",  ""],
+            ].map(([key, name, hint]) => (
+              <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F1F5F9", padding: "9px 0", flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <div style={{ fontSize: 13, color: "#0F172A", fontWeight: 600 }}>{name}</div>
+                  {hint && <div style={{ fontSize: 11, color: "#94A3B8" }}>{hint}</div>}
+                </div>
+                <input type="number" defaultValue={settings[key] == null ? "" : settings[key]}
+                  onBlur={e => saveSetting(key, e.target.value, `نقاط ${name}`)}
+                  style={{ ...inp, width: 90, padding: "6px 10px", fontSize: 13 }} />
+                <span style={{ fontSize: 11, color: "#94A3B8" }}>نقطة</span>
+              </div>
+            ))}
+          </div>
+
+          {["الأداء", "الجودة", "الفريق", "الالتزام", "الإنجازات", "التدريب", "أثر", "الهزار"].map(catName => {
+            const list = medals.filter(b => b.category === catName);
+            if (list.length === 0) return null;
+            return (
+              <div key={catName} style={card}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 10 }}>{catName} ({list.length})</div>
+                {list.map(b => (
+                  <div key={b.id} style={{ background: b.is_active === false ? "#FEF2F2" : "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 11, padding: "9px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 18 }}>{b.icon}</span>
+                    <div style={{ flex: 1, minWidth: 130 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{b.name}</div>
+                      <div style={{ fontSize: 11, color: "#94A3B8" }}>
+                        {b.description}
+                        {b.repeat_type === "daily" ? " · يومية" : b.repeat_type === "weekly" ? " · أسبوعية" : ""}
+                        {b.award_type === "manual" ? " · يدوية" : ""}
+                      </div>
+                    </div>
+                    <select value={b.grade || "medium"} onChange={e => saveMedal(b, "grade", e.target.value)}
+                      style={{ ...inp, width: "auto", padding: "5px 9px", fontSize: 12 }}>
+                      <option value="easy">سهلة</option>
+                      <option value="medium">متوسطة</option>
+                      <option value="hard">صعبة</option>
+                    </select>
+                    <input type="number" defaultValue={b.points == null ? "" : b.points} placeholder="تلقائي"
+                      onBlur={e => saveMedal(b, "points", e.target.value === "" ? null : Number(e.target.value))}
+                      title="نقاط مخصصة · سيبيها فاضية عشان تاخد نقاط درجتها"
+                      style={{ ...inp, width: 78, padding: "5px 8px", fontSize: 12 }} />
+                    <button onClick={() => saveMedal(b, "is_active", b.is_active === false)}
+                      style={{ background: b.is_active === false ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${b.is_active === false ? "#FECACA" : "#A7F3D0"}`, color: b.is_active === false ? "#DC2626" : "#059669", padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700 }}>
+                      {b.is_active === false ? "موقوفة" : "مفعّلة"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </>
       )}
 
