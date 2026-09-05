@@ -5,6 +5,7 @@ import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWork
 import { speechSupported, createRecognizer, parseTranscript } from "../voice.js";
 import { activeTimer, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTime, fmtDur, fmtClock } from "../timer.js";
 import { GRADES, IMPACT, medalPoints } from "../badges.js";
+import { loadStickers, pickSticker } from "../stickers.js";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
@@ -94,6 +95,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   const [taskMedals, setTaskMedals] = useState([]);
   const [medalForm, setMedalForm] = useState({ badge_id: "", reason: "", level: "small" });
   const [medalSettings, setMedalSettings] = useState({});
+  const [stickers, setStickers] = useState([]);
+  const [celebSticker, setCelebSticker] = useState(null);
   const [savingMedal, setSavingMedal] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [listening, setListening] = useState(false);
@@ -136,6 +139,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     if (b) setMedals(b);
     if (mb) setTaskMedals(mb);
     if (st) { const o = {}; st.forEach(x => { o[x.key] = x.value; }); setMedalSettings(o); }
+    setStickers(await loadStickers());
   }
 
   // ── الميداليات المقترحة حسب سياق التاسك (تعديل ٢٦) ──
@@ -245,6 +249,10 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   }, [voiceTrigger]);
 
   // الاحتفال بيفضل ظاهر لحد ما العضو يقفله بنفسه (تعديل ١٤)
+  useEffect(() => {
+    if (!celebrate) { setCelebSticker(null); return; }
+    setCelebSticker(pickSticker(stickers, "celebration", "achievement"));
+  }, [celebrate]);
 
   async function loadWorkHours() {
     const rows = await sb("app_settings?select=key,value");
@@ -1495,7 +1503,9 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
             <button onClick={() => setCelebrate(null)}
               style={{ position: "absolute", top: 6, left: 8, background: "none", color: "#94A3B8", fontSize: 15 }}>✕</button>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 30 }}>🎉</span>
+              {celebSticker
+                ? <img src={celebSticker.image_url} alt="" style={{ width: 48, height: 48, objectFit: "contain" }} />
+                : <span style={{ fontSize: 30 }}>🎉</span>}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A", lineHeight: 1.7 }}>{celebrate}</div>
                 <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4 }}>اضغطي ✕ لما تخلصي</div>
