@@ -4,6 +4,7 @@ import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWork
   DIFFICULTY, loadPointsConfig, computeTaskPoints, initiativePoints, longestSessionOf } from "../score.js";
 import { speechSupported, createRecognizer, parseTranscript } from "../voice.js";
 import { activeTimer, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTime, fmtDur, fmtClock } from "../timer.js";
+import { GRADES, IMPACT, medalPoints } from "../badges.js";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
@@ -87,6 +88,12 @@ export default function Tasks({ user, voiceTrigger }) {
   const [savingRate, setSavingRate] = useState(false);
   const [ptsCfg, setPtsCfg] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
+  const [medalOpen, setMedalOpen] = useState(null);          // التاسك اللي بنمنح عليها
+  const [medals, setMedals] = useState([]);
+  const [taskMedals, setTaskMedals] = useState([]);
+  const [medalForm, setMedalForm] = useState({ badge_id: "", reason: "", level: "small" });
+  const [medalSettings, setMedalSettings] = useState({});
+  const [savingMedal, setSavingMedal] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -117,7 +124,75 @@ export default function Tasks({ user, voiceTrigger }) {
     width: "100%", direction: "rtl",
   };
 
-  useEffect(() => { loadAll(); loadWorkHours(); loadPointsConfig().then(setPtsCfg); }, [selectedMonth]);
+  useEffect(() => { loadAll(); loadWorkHours(); loadPointsConfig().then(setPtsCfg); loadMedals(); }, [selectedMonth]);
+
+  async function loadMedals() {
+    const [b, mb, st] = await Promise.all([
+      sb("badges?is_active=eq.true&order=category"),
+      sb("member_badges?task_id=not.is.null&select=id,task_id,badge_name,badge_icon,member_name,note,points_awarded"),
+      sb("app_settings?select=key,value"),
+    ]);
+    if (b) setMedals(b);
+    if (mb) setTaskMedals(mb);
+    if (st) { const o = {}; st.forEach(x => { o[x.key] = x.value; }); setMedalSettings(o); }
+  }
+
+  // ── الميداليات المقترحة حسب سياق التاسك (تعديل ٢٦) ──
+  function suggestedMedals(t) {
+    if (!t) return [];
+    const names = [];
+    const doneD = t.completed_at ? String(t.completed_at).slice(0, 10) : null;
+    const dueD  = t.due_date ? String(t.due_date).slice(0, 10) : null;
+
+    if (doneD && dueD && doneD < dueD) names.push("أسرع تسليم");
+    if (Number(t.revision_count || 0) === 0 && t.status === "completed") names.push("شغل من أول مرة");
+    if (parseHelpers(t.helpers).length > 0) { names.push("أكتر متعاون"); names.push("لبّى النداء"); }
+    if (doneD && dueD && doneD > dueD) names.push("منقذ اليوم");
+
+    return medals.filter(m => names.includes(m.name));
+  }
+
+  async function grantMedal() {
+    if (!medalOpen || !medalForm.badge_id) { alert("اختاري الميدالية"); return; }
+    const b = medals.find(x => String(x.id) === String(medalForm.badge_id));
+    if (!b) return;
+    if (!medalForm.reason.trim()) { alert("سبب المنح إلزامي"); return; }
+    setSavingMedal(true);
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const isImpact = b.category === "أثر";
+    const level = isImpact ? (medalForm.level || "small") : null;
+    const pts = medalSettings.feature_medal_points === "0" ? 0 : medalPoints(b, medalSettings, level);
+    const owner = medalOpen.assigned_to;
+
+    await sb("member_badges", "POST", {
+      member_name: owner, badge_id: String(b.id),
+      badge_name: b.name, badge_icon: b.icon,
+      month: medalOpen.month || CURRENT_MONTH,
+      period: b.repeat_type === "daily" ? `d:${todayStr}` : (medalOpen.month || CURRENT_MONTH),
+      award_date: todayStr, points_awarded: pts, impact_level: level,
+      awarded_by: user.name, note: medalForm.reason.trim(),
+      task_id: String(medalOpen.id), task_title: medalOpen.title,
+    });
+
+    if (pts > 0) {
+      await addScore({ member: owner, month: medalOpen.month || CURRENT_MONTH, points: pts, source: "medal",
+        reason: `ميدالية «${b.name}» على تاسك «${medalOpen.title}»`, by: user.name });
+    }
+
+    for (const m of members) {
+      await addNotification(m.name,
+        m.name === owner
+          ? `${b.icon} حصلت على ميدالية «${b.name}» على تاسك «${medalOpen.title}» — ${medalForm.reason.trim()}${pts > 0 ? ` · +${pts} نقطة` : ""}`
+          : `${b.icon} ${owner} خد ميدالية «${b.name}» — ${medalForm.reason.trim()}`,
+        "info", medalOpen.id);
+    }
+
+    setSavingMedal(false);
+    setMedalOpen(null);
+    setMedalForm({ badge_id: "", reason: "", level: "small" });
+    await loadMedals();
+  }
 
   // ── التايمر الشغال + العداد ──
   useEffect(() => { activeTimer(user.name).then(setTimer); }, [user.name]);
@@ -870,6 +945,34 @@ export default function Tasks({ user, voiceTrigger }) {
                     </div>
                   )}
 
+                  {/* الميداليات الممنوحة على التاسك دي */}
+                  {taskMedals.filter(x => String(x.task_id) === String(showDetail.id)).length > 0 && (
+                    <div style={{ marginBottom: 14 }}>
+                      {taskMedals.filter(x => String(x.task_id) === String(showDetail.id)).map(x => (
+                        <div key={x.id} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px", marginBottom: 5 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
+                            {x.badge_icon} ميدالية «{x.badge_name}» لـ{x.member_name}
+                            {Number(x.points_awarded) > 0 && <span style={{ color: "#059669", fontSize: 12 }}> · +{x.points_awarded}</span>}
+                          </div>
+                          {x.note && <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{x.note}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* زرار منح ميدالية — للمدير */}
+                  {isAdmin && (
+                    <div style={{ marginBottom: 14 }}>
+                      <button onClick={() => {
+                        const sug = suggestedMedals(showDetail);
+                        setMedalForm({ badge_id: sug[0] ? String(sug[0].id) : "", reason: showDetail.title, level: "small" });
+                        setMedalOpen(showDetail);
+                      }} style={{ width: "100%", background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+                        🏅 امنح ميدالية
+                      </button>
+                    </div>
+                  )}
+
                   {/* زرار التقييم — للمدير */}
                   {(showDetail.points_awarded != null || showDetail.difficulty) && (
                     <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
@@ -1259,6 +1362,85 @@ export default function Tasks({ user, voiceTrigger }) {
           </div>
         </div>
       )}
+
+      {/* ═══ منح ميدالية من داخل التاسك ═══ */}
+      {medalOpen && (() => {
+        const sug = suggestedMedals(medalOpen);
+        const sugIds = new Set(sug.map(x => String(x.id)));
+        const rest = medals.filter(m => !sugIds.has(String(m.id)));
+        const chosen = medals.find(m => String(m.id) === String(medalForm.badge_id));
+        const isImpact = chosen && chosen.category === "أثر";
+        const pts = chosen ? medalPoints(chosen, medalSettings, isImpact ? medalForm.level : null) : 0;
+        return (
+          <div onClick={e => e.target === e.currentTarget && setMedalOpen(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 330, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 470, maxHeight: "92vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(15,23,42,0.2)" }}>
+              <h3 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 800, color: "#0F172A" }}>🏅 امنح ميدالية</h3>
+              <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 16 }}>
+                لـ <b style={{ color: "#0F172A" }}>{medalOpen.assigned_to}</b> على «{medalOpen.title}»
+              </div>
+
+              {sug.length > 0 && (
+                <>
+                  <div style={{ fontSize: 12, color: "#059669", marginBottom: 6, fontWeight: 700 }}>✨ مقترحة حسب التاسك دي</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                    {sug.map(m => {
+                      const on = String(medalForm.badge_id) === String(m.id);
+                      return (
+                        <button key={m.id} onClick={() => setMedalForm(f => ({ ...f, badge_id: String(m.id) }))}
+                          style={{ padding: "8px 12px", borderRadius: 12, border: `2px solid ${on ? "#D97706" : "#FDE68A"}`, background: on ? "#FFFBEB" : "#FFFFFF", color: "#0F172A", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                          {m.icon} {m.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>أو اختاري من القائمة الكاملة</div>
+              <select value={medalForm.badge_id} onChange={e => setMedalForm(f => ({ ...f, badge_id: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
+                <option value="">— اختاري —</option>
+                {[...sug, ...rest].map(m => <option key={m.id} value={m.id}>{m.icon} {m.name} · {m.category}</option>)}
+              </select>
+
+              {isImpact && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 6, fontWeight: 600 }}>مستوى الأثر</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {Object.entries(IMPACT).map(([k, v]) => {
+                      const on = (medalForm.level || "small") === k;
+                      const val = medalSettings[v.key] != null ? medalSettings[v.key] : v.def;
+                      return (
+                        <button key={k} onClick={() => setMedalForm(f => ({ ...f, level: k }))}
+                          style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: `2px solid ${on ? "#7C3AED" : "#E2E8F0"}`, background: on ? "#F5F3FF" : "#F8FAFC", color: on ? "#7C3AED" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                          {v.l}<div style={{ fontSize: 10, marginTop: 2 }}>+{val}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>سبب المنح * <span style={{ color: "#94A3B8", fontWeight: 400 }}>— بيظهر لكل الفريق</span></div>
+              <textarea value={medalForm.reason} onChange={e => setMedalForm(f => ({ ...f, reason: e.target.value }))} rows={2} style={{ ...inp, resize: "vertical", marginBottom: 12 }} />
+
+              {chosen && (
+                <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 10, padding: "9px 13px", fontSize: 12, color: "#059669", marginBottom: 14, fontWeight: 700 }}>
+                  {medalOpen.assigned_to} هياخد <b style={{ fontSize: 15 }}>+{pts}</b> نقطة في رصيده
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={grantMedal} disabled={savingMedal || !medalForm.badge_id}
+                  style={{ flex: 1, background: (savingMedal || !medalForm.badge_id) ? "#CBD5E1" : "linear-gradient(135deg,#D97706,#B45309)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                  {savingMedal ? "..." : "امنح 🏅"}
+                </button>
+                <button onClick={() => setMedalOpen(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ تفصيل النقاط بعد الإتمام ═══ */}
       {breakdown && (
