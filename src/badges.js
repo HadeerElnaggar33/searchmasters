@@ -1,8 +1,49 @@
 import { sb, addNotification, CURRENT_MONTH } from "./supabase.js";
+import { addScore } from "./score.js";
 import { loadLedger, totalsFrom, rankMembers } from "./score.js";
 import { loadWorkConfig, isWorkingDay, countWorkingDays } from "./workdays.js";
 
 function dayOf(v) { return v ? String(v).slice(0, 10) : null; }
+
+export const GRADES = {
+  easy:   { l: "سهلة",      key: "medal_pts_easy",   def: 3,  color: "#059669" },
+  medium: { l: "متوسطة",    key: "medal_pts_medium", def: 5,  color: "#2563EB" },
+  hard:   { l: "صعبة",      key: "medal_pts_hard",   def: 10, color: "#7C3AED" },
+};
+
+export const IMPACT = {
+  small:  { l: "أثر بسيط",  key: "impact_small",  def: 10 },
+  medium: { l: "أثر متوسط", key: "impact_medium", def: 15 },
+  big:    { l: "أثر كبير",  key: "impact_big",    def: 25 },
+};
+
+// نقاط الميدالية: القيمة المخصصة، وإلا مستوى الأثر، وإلا نقاط الدرجة
+export function medalPoints(badge, settings = {}, impactLevel) {
+  if (badge && badge.points != null && badge.points !== "") return Number(badge.points);
+  if (impactLevel && IMPACT[impactLevel]) {
+    const v = settings[IMPACT[impactLevel].key];
+    return v != null ? Number(v) : IMPACT[impactLevel].def;
+  }
+  const g = GRADES[(badge && badge.grade) || "medium"] || GRADES.medium;
+  const v = settings[g.key];
+  return v != null ? Number(v) : g.def;
+}
+
+// مفتاح التكرار: مرة واحدة · يومي · أسبوعي
+export function repeatKey(badge, month, dateStr) {
+  const t = (badge && badge.repeat_type) || "once";
+  if (t === "daily")  return `d:${dateStr}`;
+  if (t === "weekly") return `w:${weekKey(dateStr)}`;
+  return month || "";
+}
+
+export function weekKey(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const day = d.getDay();
+  const sunday = new Date(d);
+  sunday.setDate(d.getDate() - day);
+  return `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, "0")}-${String(sunday.getDate()).padStart(2, "0")}`;
+}
 function parseHelpers(v) {
   if (!v) return [];
   if (Array.isArray(v)) return v.filter(Boolean);
@@ -88,6 +129,60 @@ export function measure(key, name, ctx) {
       return wins;
     }
 
+    case "helped_calls":
+      return tasks.filter(t => t.assigned_to === name && String(t.title || "").startsWith("الحقوني") && t.status === "completed").length;
+
+    case "no_absence": {
+      const absent = (ctx.workDates || []).filter(d =>
+        !attendance.some(a => a.member_name === name && dayOf(a.date) === d));
+      return absent.length === 0 && (ctx.workDates || []).length > 0 ? 1 : 0;
+    }
+
+    case "no_stalled": {
+      const stalled = mine.filter(t => t.status !== "completed" && t.due_date &&
+        dayOf(t.due_date) < new Date().toISOString().slice(0, 10));
+      return stalled.length === 0 && mine.length > 0 ? 1 : 0;
+    }
+
+    case "late_cleared":
+      return mine.filter(t => t.status === "completed" && t.due_date && t.completed_at &&
+        dayOf(t.completed_at) > dayOf(t.due_date)).length;
+
+    case "mood_streak":
+      return (ctx.moodDays || []).filter(m2 => m2.member_name === name).length;
+
+    case "day_starter": {
+      const today2 = new Date().toISOString().slice(0, 10);
+      const dayRows = attendance.filter(a => dayOf(a.date) === today2 && a.clock_in && a.status !== "leave");
+      if (dayRows.length === 0) return 0;
+      const first = dayRows.reduce((a, b) => new Date(a.clock_in) <= new Date(b.clock_in) ? a : b);
+      return first.member_name === name ? 1 : 0;
+    }
+
+    case "day_closer": {
+      const today2 = new Date().toISOString().slice(0, 10);
+      const doneToday = tasks.filter(t => t.status === "completed" && dayOf(t.completed_at) === today2);
+      if (doneToday.length === 0) return 0;
+      const last = doneToday.reduce((a, b) => new Date(a.completed_at) >= new Date(b.completed_at) ? a : b);
+      return last.assigned_to === name ? 1 : 0;
+    }
+
+    // شروط لسه مربوطة بأقسام ما اتبنتش (الحقوني · السحب · التدريب)
+    case "first_responder":
+    case "draw_wins":
+    case "draw_entries":
+    case "positive_mood":
+    case "week_target":
+    case "week_on_time":
+    case "week_overtime":
+    case "clean_week":
+    case "training_all":
+    case "training_ontime":
+    case "training_first":
+    case "training_excellent":
+    case "training_done":
+      return 0;
+
     default:
       return 0;
   }
@@ -119,7 +214,27 @@ export async function runBadges(month = CURRENT_MONTH) {
     const workDays = countWorkingDays(`${now.getFullYear()}-${mm}-01`, `${now.getFullYear()}-${mm}-${last}`, cfg);
     const targetMins = workDays * dailyHours * 60;
 
-    const has = new Set((owned || []).map(o => `${o.member_name}|${o.badge_id}|${o.month || ""}`));
+    const settingsMap = {};
+    for (const r of (await sb("app_settings?select=key,value")) || []) settingsMap[r.key] = r.value;
+    const pointsOn = settingsMap.feature_medal_points !== "0";
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const has = new Set((owned || []).map(o => `${o.member_name}|${o.badge_id}|${o.period || o.month || ""}`));
+
+    // أيام العمل الفعلية في الشهر (لميدالية «ما غابش»)
+    const workDates = [];
+    {
+      const cur = new Date(`${now.getFullYear()}-${mm}-01T00:00:00`);
+      const stop = new Date(`${now.getFullYear()}-${mm}-${String(last).padStart(2, "0")}T00:00:00`);
+      let guard = 0;
+      while (cur <= stop && cur <= now && guard < 40) {
+        const d = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(cur.getDate()).padStart(2, "0")}`;
+        if (isWorkingDay(d, cfg)) workDates.push(d);
+        cur.setDate(cur.getDate() + 1); guard++;
+      }
+    }
+    const moodDays = (await sb(`mood_answers?skipped=eq.false&select=member_name,answer_date`)) || [];
+
     let awarded = 0;
 
     for (const m of (members || [])) {
@@ -132,22 +247,32 @@ export async function runBadges(month = CURRENT_MONTH) {
         if (isWorkingDay(d, cfg)) workedMins += v; else extraMins += v;
       }
 
-      const ctx = { tasks: tasks || [], ledger, attendance: attendance || [], winners: winners || [], reviews: reviews || [], members: members || [], targetMins, workedMins, extraMins };
+      const ctx = { tasks: tasks || [], ledger, attendance: attendance || [], winners: winners || [], reviews: reviews || [], members: members || [], targetMins, workedMins, extraMins, workDates, moodDays };
 
       for (const b of all) {
-        // الشارات المتكررة شهرياً بتتخزن بالشهر، والدايمة من غير شهر
-        const perMonth = !["eom_wins"].includes(b.condition_key);
-        const key = `${m.name}|${b.id}|${perMonth ? month : ""}`;
+        const period = repeatKey(b, ["eom_wins"].includes(b.condition_key) ? "" : month, todayStr);
+        const key = `${m.name}|${b.id}|${period}`;
         if (has.has(key)) continue;
 
         const value = measure(b.condition_key, m.name, ctx);
         if (value >= Number(b.threshold || 1)) {
+          const pts = pointsOn ? medalPoints(b, settingsMap) : 0;
+
           await sb("member_badges", "POST", {
             member_name: m.name, badge_id: String(b.id),
             badge_name: b.name, badge_icon: b.icon,
-            month: perMonth ? month : null, awarded_by: "🤖 تلقائي",
+            month, period, award_date: todayStr,
+            points_awarded: pts, awarded_by: "🤖 تلقائي",
           });
-          await addNotification(m.name, `${b.icon} حصلت على شارة: ${b.name}`, "info");
+
+          if (pts > 0) {
+            await addScore({
+              member: m.name, month, points: pts, source: "medal",
+              reason: `ميدالية «${b.name}»`, by: "🤖 تلقائي",
+            });
+          }
+
+          await addNotification(m.name, `${b.icon} حصلت على ميدالية: ${b.name}${pts > 0 ? ` · +${pts} نقطة` : ""}`, "info");
           has.add(key);
           awarded++;
         }
