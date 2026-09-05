@@ -95,7 +95,9 @@ export default function Tasks({ user }) {
   const [nudge, setNudge] = useState(false);       // تنبيه تشغيل الوقت
   const nudgeRef = useRef(null);
 
-  const isAdmin = user.role === "admin" || user.role === "team_leader";
+  const isAdmin = user.role === "admin";
+  // صلاحية إدارة التاسكات: يضيف ويشوف ويحذف تاسكات الفريق
+  const canAssign = isAdmin || user.can_assign_tasks === true;
   const today = getTodayStr();
 
   const emptyForm = {
@@ -433,7 +435,8 @@ export default function Tasks({ user }) {
   }
 
   const filtered = tasks.filter(t => {
-    if (!isAdmin && !isOnTask(t, user.name)) return false;
+    // الموظف يشوف تاسكاته بس · واللي عنده صلاحية إدارة التاسكات يشوف الفريق كله
+    if (!canAssign && !isOnTask(t, user.name)) return false;
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
     if (filterAssignee !== "all" && !isOnTask(t, filterAssignee)) return false;
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
@@ -507,7 +510,7 @@ export default function Tasks({ user }) {
           <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{ ...inp, width: "auto", padding: "8px 12px", fontSize: 13 }}>
             {MONTHS.map(m => <option key={m} value={`${m} ${new Date().getFullYear()}`}>{m} {new Date().getFullYear()}</option>)}
           </select>
-          {isAdmin && (
+          {canAssign && (
             <>
             <button onClick={() => { setTranscript(""); setParsed(null); setVoiceErr(""); setVoiceOpen(true); }}
               title="سجّلي التاسك بصوتك"
@@ -529,7 +532,7 @@ export default function Tasks({ user }) {
           <option value="all">كل الحالات</option>
           {Object.entries(STATUS_CONFIG).map(([k,v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
         </select>
-        {isAdmin && (
+        {canAssign && (
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} style={{ ...inp, width: "auto", padding: "8px 10px", fontSize: 12 }}>
             <option value="all">الكل</option>
             {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
@@ -752,7 +755,7 @@ export default function Tasks({ user }) {
                     </div>
                   )}
 
-                  {isAdmin && <div style={{ marginBottom: 14 }}><button onClick={() => setConfirmDelete(showDetail)} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "7px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>🗑 حذف التاسك</button></div>}
+                  {canAssign && <div style={{ marginBottom: 14 }}><button onClick={() => setConfirmDelete(showDetail)} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "7px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>🗑 حذف التاسك</button></div>}
 
                   {/* ═══ التقييم والفيدباك ═══ */}
                   {(showDetail.rating || showDetail.feedback_positive || showDetail.feedback_negative) && (
