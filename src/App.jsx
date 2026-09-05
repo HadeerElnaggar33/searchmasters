@@ -38,7 +38,7 @@ const NAV = [
   { id: "team",       icon: "👥", label: "الفريق",      mobileShow: false, adminOnly: true },
   { id: "eom",        icon: "🏆", label: "موظف الشهر",  mobileShow: false },
   { id: "feedback",   icon: "💬", label: "الملاحظات",   mobileShow: false },
-  { id: "settings",   icon: "⚙️", label: "الإعدادات",   mobileShow: false, adminOnly: true },
+  { id: "settings",   icon: "🎛", label: "الكنترول",    mobileShow: false, adminOnly: true },
   { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
   { id: "leaves",     icon: "🏖", label: "الإجازات",    mobileShow: false },
   { id: "hours",      icon: "⏱", label: "الساعات",     mobileShow: false },
