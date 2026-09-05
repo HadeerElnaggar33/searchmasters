@@ -24,7 +24,7 @@ import Draws, { DrawPopup } from "./pages/Draws.jsx";
 import Live from "./pages/Live.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
-import { heartbeat } from "./timer.js";
+import { heartbeat, activeTimer, stopTimer, fmtClock } from "./timer.js";
 
 const NAV = [
   { id: "dashboard",  icon: "🏠", label: "الرئيسية",    mobileShow: true },
@@ -72,6 +72,12 @@ export default function App() {
   const isMobile = useIsMobile();
   const pollRef = useRef();
   const engineRef = useRef(false);
+  const [voiceTrigger, setVoiceTrigger] = useState(0);
+  const [timer, setTimer] = useState(null);
+  const [, setTick] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [searchData, setSearchData] = useState({ tasks: [], projects: [], members: [] });
 
   useEffect(() => {
     if (!user) return;
@@ -79,6 +85,55 @@ export default function App() {
     pollRef.current = setInterval(loadNotifs, 10000);
     return () => clearInterval(pollRef.current);
   }, [user]);
+
+  // ── تعديل ٣: المؤقت في البار العلوي ──
+  useEffect(() => {
+    if (!user) return;
+    const load = () => activeTimer(user.name).then(setTimer).catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, [user, page]);
+
+  useEffect(() => {
+    if (!timer) return;
+    const t = setInterval(() => setTick(x => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [timer]);
+
+  async function stopTopTimer() {
+    await stopTimer(user.name);
+    setTimer(null);
+  }
+
+  // ── تعديل ٥: البحث السريع ──
+  async function openSearch() {
+    setSearchOpen(true);
+    if (searchData.tasks.length === 0) {
+      const [t, p, m] = await Promise.all([
+        sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&select=id,title,assigned_to,status,project_id`),
+        sb("projects?select=id,name,client_name"),
+        sb("team_members?is_active=eq.true&select=id,name,job_title"),
+      ]);
+      setSearchData({ tasks: t || [], projects: p || [], members: m || [] });
+    }
+  }
+
+  function searchResults() {
+    const s2 = q.trim().toLowerCase();
+    if (s2.length < 2) return { tasks: [], projects: [], members: [] };
+    const hit = v => String(v || "").toLowerCase().includes(s2);
+    return {
+      tasks: searchData.tasks.filter(t => hit(t.title) || hit(t.assigned_to)).slice(0, 6),
+      projects: searchData.projects.filter(p => hit(p.name) || hit(p.client_name)).slice(0, 5),
+      members: searchData.members.filter(m => hit(m.name) || hit(m.job_title)).slice(0, 5),
+    };
+  }
+
+  function goTo(target) {
+    setSearchOpen(false); setQ("");
+    setPage(target);
+  }
 
   // ── نبضة التواجد: بتتحدث كل دقيقتين طول ما الأداة مفتوحة ──
   useEffect(() => {
@@ -137,7 +192,7 @@ export default function App() {
 
   const PAGES = {
     dashboard:  <Dashboard  user={user} onNavigate={setPage} />,
-    tasks:      <Tasks      user={user} />,
+    tasks:      <Tasks      user={user} voiceTrigger={voiceTrigger} />,
     projects:   <Projects   user={user} />,
     team:       <Team       user={user} />,
     reports:    <Reports    user={user} />,
@@ -227,6 +282,52 @@ export default function App() {
       {/* نافذة السحب — بتظهر لوحدها في أي صفحة */}
       <DrawPopup user={user} />
 
+      {/* ═══ البحث السريع ═══ */}
+      {searchOpen && (() => {
+        const r = searchResults();
+        const total = r.tasks.length + r.projects.length + r.members.length;
+        const row = (icon, main, sub, onClick) => (
+          <button key={main + sub} onClick={onClick}
+            style={{ width: "100%", textAlign: "right", background: "#FFFFFF", border: "none", borderBottom: "1px solid #F1F5F9", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 15 }}>{icon}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 13, color: "#0F172A", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{main}</span>
+              {sub && <span style={{ display: "block", fontSize: 11, color: "#94A3B8" }}>{sub}</span>}
+            </span>
+          </button>
+        );
+        const head = t => <div key={t} style={{ padding: "7px 16px", background: "#F8FAFC", fontSize: 11, fontWeight: 700, color: "#64748B" }}>{t}</div>;
+        return (
+          <div onClick={e => e.target === e.currentTarget && (setSearchOpen(false), setQ(""))}
+            style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 550, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 70, padding: "70px 16px 16px" }}>
+            <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 16, width: "100%", maxWidth: 520, boxShadow: "0 12px 40px rgba(15,23,42,0.2)", overflow: "hidden", maxHeight: "75vh", display: "flex", flexDirection: "column" }}>
+              <div style={{ padding: 14, borderBottom: "1px solid #E2E8F0", display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 16 }}>🔎</span>
+                <input autoFocus value={q} onChange={e => setQ(e.target.value)}
+                  placeholder="دوّري في التاسكات والمشاريع والفريق..."
+                  style={{ flex: 1, background: "#F8FAFC", border: "1.5px solid #E2E8F0", color: "#0F172A", padding: "10px 12px", borderRadius: 10, fontSize: 14, outline: "none", direction: "rtl" }} />
+                <button onClick={() => { setSearchOpen(false); setQ(""); }} style={{ background: "none", color: "#94A3B8", fontSize: 18 }}>✕</button>
+              </div>
+              <div style={{ overflowY: "auto" }}>
+                {q.trim().length < 2
+                  ? <div style={{ padding: 24, textAlign: "center", color: "#94A3B8", fontSize: 13 }}>اكتبي حرفين على الأقل</div>
+                  : total === 0
+                    ? <div style={{ padding: 24, textAlign: "center", color: "#94A3B8", fontSize: 13 }}>مفيش نتايج لـ «{q}»</div>
+                    : <>
+                        {r.tasks.length > 0 && head(`📋 تاسكات (${r.tasks.length})`)}
+                        {r.tasks.map(t => row("📋", t.title, t.assigned_to, () => goTo("tasks")))}
+                        {r.projects.length > 0 && head(`📁 مشاريع (${r.projects.length})`)}
+                        {r.projects.map(p => row("📁", p.name, p.client_name, () => goTo("projects")))}
+                        {r.members.length > 0 && head(`👤 الفريق (${r.members.length})`)}
+                        {r.members.map(m => row("👤", m.name, m.job_title, () => goTo(isAdmin ? "team" : "dashboard")))}
+                      </>
+                }
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* HEADER */}
       <header style={{ background: "#FFFFFF", borderBottom: "1px solid #E2E8F0", padding: isMobile ? "0 12px" : "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56, position: "sticky", top: 0, zIndex: 100, flexShrink: 0, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -239,6 +340,31 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+
+          {/* المؤقت */}
+          {timer && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 20, padding: isMobile ? "3px 8px" : "4px 12px" }}>
+              <span style={{ fontSize: 13 }}>⏱</span>
+              {!isMobile && (
+                <span style={{ fontSize: 11, color: "#059669", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{timer.task_title}</span>
+              )}
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#059669", fontVariantNumeric: "tabular-nums" }}>
+                {fmtClock(Math.floor((Date.now() - new Date(timer.started_at)) / 1000))}
+              </span>
+              <button onClick={stopTopTimer} title="إيقاف" style={{ background: "#DC2626", color: "#fff", width: 20, height: 20, borderRadius: "50%", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>⏹</button>
+            </div>
+          )}
+
+          {/* البحث */}
+          <button onClick={openSearch} title="بحث سريع"
+            style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", width: 36, height: 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>🔎</button>
+
+          {/* المايك */}
+          {(user.role === "admin" || user.can_assign_tasks === true) && (
+            <button onClick={() => { setPage("tasks"); setVoiceTrigger(x => x + 1); }} title="تاسك بالصوت"
+              style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#7C3AED", width: 36, height: 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>🎤</button>
+          )}
+
           <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 6px #10B981" }}></div>
 
           {/* Notifications */}
@@ -248,7 +374,11 @@ onClick={() => setPage("notifications")}
               style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", width: 36, height: 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, position: "relative" }}
             >
               🔔
-              {notifCount > 0 && <span style={{ position: "absolute", top: 1, left: 1, background: "#EF4444", color: "#fff", borderRadius: "50%", width: 15, height: 15, fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>{notifCount}</span>}
+              {notifCount > 0 && (
+                <span style={{ position: "absolute", top: -2, left: -2, background: "#EF4444", color: "#fff", borderRadius: 10, minWidth: 18, height: 18, padding: "0 4px", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #FFFFFF" }}>
+                  {notifCount > 99 ? "99+" : notifCount}
+                </span>
+              )}
             </button>
             {showNotifs && (
               <div style={{ position: "fixed", top: 58, left: isMobile ? 8 : "auto", right: isMobile ? 8 : 16, width: isMobile ? "auto" : 320, background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 14, boxShadow: "0 8px 32px rgba(15,23,42,0.12)", zIndex: 300, overflow: "hidden", maxHeight: 420, overflowY: "auto" }}>
