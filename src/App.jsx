@@ -73,6 +73,7 @@ export default function App() {
   const pollRef = useRef();
   const engineRef = useRef(false);
   const [voiceTrigger, setVoiceTrigger] = useState(0);
+  const [taskFilter, setTaskFilter] = useState(null);
   const [timer, setTimer] = useState(null);
   const [, setTick] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -191,8 +192,8 @@ export default function App() {
   const isAdmin = user.role === "admin" || user.role === "team_leader";
 
   const PAGES = {
-    dashboard:  <Dashboard  user={user} onNavigate={setPage} />,
-    tasks:      <Tasks      user={user} voiceTrigger={voiceTrigger} />,
+    dashboard:  <Dashboard  user={user} onNavigate={(p, f) => { if (f) setTaskFilter({ ...f, _k: Date.now() }); setPage(p); }} />,
+    tasks:      <Tasks      user={user} voiceTrigger={voiceTrigger} incomingFilter={taskFilter} />,
     projects:   <Projects   user={user} />,
     team:       <Team       user={user} />,
     reports:    <Reports    user={user} />,
