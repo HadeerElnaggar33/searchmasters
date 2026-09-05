@@ -55,7 +55,7 @@ function getFileIcon(url) {
   return "🔗";
 }
 
-export default function Tasks({ user, voiceTrigger }) {
+export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [members, setMembers] = useState([]);
@@ -71,6 +71,7 @@ export default function Tasks({ user, voiceTrigger }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterAssignee, setFilterAssignee] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
+  const [filterOverdue, setFilterOverdue] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(CURRENT_MONTH);
   const [showShift, setShowShift] = useState(null);
@@ -227,6 +228,15 @@ export default function Tasks({ user, voiceTrigger }) {
     }
     await loadAll();
   }
+
+  // فلتر جاي من كروت الصفحة الرئيسية
+  useEffect(() => {
+    if (!incomingFilter) return;
+    setFilterStatus(incomingFilter.status || "all");
+    setFilterPriority(incomingFilter.priority || "all");
+    setFilterOverdue(!!incomingFilter.overdue);
+    setSearch("");
+  }, [incomingFilter && incomingFilter._k]);
 
   // فتح نافذة الصوت لما تتضغط أيقونة المايك في البار العلوي
   useEffect(() => {
@@ -578,6 +588,7 @@ export default function Tasks({ user, voiceTrigger }) {
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
     if (filterAssignee !== "all" && !isOnTask(t, filterAssignee)) return false;
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
+    if (filterOverdue && !(t.due_date && String(t.due_date).slice(0,10) < today && t.status !== "completed" && t.status !== "cancelled")) return false;
     if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.assigned_to?.includes(search) && !parseHelpers(t.helpers).some(h => h.includes(search))) return false;
     return true;
   });
@@ -1249,6 +1260,13 @@ export default function Tasks({ user, voiceTrigger }) {
               {savingRate ? "جاري الحفظ..." : "حفظ ✓"}
             </button>
           </div>
+        </div>
+      )}
+
+      {filterOverdue && (
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "9px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: "#D97706", fontWeight: 700, flex: 1 }}>🔴 بتعرض التاسكات المتأخرة بس</span>
+          <button onClick={() => setFilterOverdue(false)} style={{ background: "#FFFFFF", border: "1px solid #FDE68A", color: "#D97706", padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600 }}>عرض الكل ✕</button>
         </div>
       )}
 
