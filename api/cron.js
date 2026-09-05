@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════
 //  Search Masters Workspace — المهمة اليومية
-//  المرحلة 3: توليد التاسكات المتكررة + التقرير الأسبوعي + التذكيرات
+//  المرحلة 4: التاسكات المتكررة + التقرير الأسبوعي + التذكيرات
+//              + نقاط الضغط اليومي ونقاط الساعات (عن يوم أمس)
 //  تشتغل كل يوم 6:00 UTC ≈ 9 صباحاً بتوقيت القاهرة
 //
 //  للاختبار بدون كتابة أي بيانات:  /api/cron?dry=1
@@ -243,6 +244,110 @@ export default async function handler(req, res) {
       notices.push(`🌙 فيدباك متأجل → ${t.assigned_to}: ${t.title}`);
     }
 
+    // ── (أ3) فحص الشارات التلقائية ──
+    if (!dryRun) {
+      const autoBadges = await api("badges?is_active=eq.true&award_type=eq.auto&select=id,name");
+      notices.push(`🏅 شارات تلقائية متاحة: ${autoBadges.length} (بتتفحص من الأبلكيشن)`);
+    }
+
+    // ═══════════════════════════════════════════
+    //  نقاط الضغط ونقاط الساعات — عن يوم أمس
+    // ═══════════════════════════════════════════
+    const P = {
+      press_th_high: 5, press_th_very: 10, press_mult_high: 1.25, press_mult_very: 1.5,
+      press_w_open: 1, press_w_due: 2, press_w_urgent: 2, press_w_hours: 2,
+      pts_hour_normal: 0.5, pts_hour_extra: 1, pts_hour_training: 1.5,
+      feature_pressure: 1, feature_hour_points: 1,
+    };
+    const allSettings = await api("app_settings?select=key,value");
+    for (const r of allSettings) {
+      if (r.key in P) { const n = Number(r.value); if (Number.isFinite(n)) P[r.key] = n; }
+    }
+
+    const yDate = addDays(today, -1);
+    const yLabel = monthLabel(yDate);
+    const yTasks  = await api(`tasks?month=eq.${encodeURIComponent(yLabel)}`);
+    const yAtt    = await api(`attendance?date=eq.${yesterday}`);
+    const yLedger = await api(`score_ledger?month=eq.${encodeURIComponent(yLabel)}&select=member_name,points,source,created_at,ref`);
+    const allAtt  = await api("attendance?select=member_name,working_minutes,status");
+
+    const pressureNotes = [];
+
+    for (const m of members) {
+      const refP = `press:${yesterday}:${m.name}`;
+      const refH = `hours:${yesterday}:${m.name}`;
+      const att = yAtt.find(a => a.member_name === m.name);
+      const onLeave = att && att.status === "leave";
+
+      // ── نقاط الساعات ──
+      if (P.feature_hour_points !== 0 && att && !onLeave) {
+        const mins = Number(att.working_minutes) || 0;
+        if (mins > 0) {
+          const workDay = isWorkingDay(yesterday, cfg);
+          const rate = workDay ? P.pts_hour_normal : P.pts_hour_extra;
+          const pts = Math.round((mins / 60) * rate * 10) / 10;
+          if (pts > 0) {
+            const dup = await api(`score_ledger?ref=eq.${encodeURIComponent(refH)}&source=eq.hours&select=id`);
+            if (dup.length === 0) {
+              if (!dryRun) {
+                await api("score_ledger", "POST", {
+                  member_name: m.name, month: yLabel, points: pts, source: "hours",
+                  ref: refH, created_by: "🤖 تلقائي",
+                  reason: `${Math.round(mins / 6) / 10} ساعة ${workDay ? "شغل" : "خارج أيام العمل"} — ${yesterday}`,
+                });
+              }
+              notices.push(`${dryRun ? "🧪" : "⏱"} ${m.name}: +${pts} نقاط ساعات`);
+            }
+          }
+        }
+      }
+
+      // ── نقاط الضغط ──
+      if (P.feature_pressure !== 0 && !onLeave) {
+        const mine = yTasks.filter(t => t.assigned_to === m.name && t.status !== "cancelled");
+        const openThen = mine.filter(t => t.status !== "completed" || dayOf(t.completed_at) >= yesterday).length;
+        const dueSoon  = mine.filter(t => dayOf(t.due_date) === yesterday || dayOf(t.due_date) === todayStr).length;
+        const urgentN  = mine.filter(t => t.priority === "urgent" && t.status !== "completed").length;
+
+        const dayMinutes = att ? Number(att.working_minutes) || 0 : 0;
+        const mineAtt = allAtt.filter(a => a.member_name === m.name && a.status !== "leave" && Number(a.working_minutes) > 0);
+        const avgMinutes = mineAtt.length ? mineAtt.reduce((s2, a) => s2 + Number(a.working_minutes), 0) / mineAtt.length : 0;
+
+        let pScore = openThen * P.press_w_open + dueSoon * P.press_w_due + urgentN * P.press_w_urgent;
+        if (avgMinutes > 0 && dayMinutes > avgMinutes * 1.25) pScore += P.press_w_hours;
+        pScore = Math.round(pScore * 10) / 10;
+
+        let mult = 1, pLabel = "عادي";
+        if (pScore >= P.press_th_very) { mult = P.press_mult_very; pLabel = "عالي جداً"; }
+        else if (pScore >= P.press_th_high) { mult = P.press_mult_high; pLabel = "مرتفع"; }
+
+        if (mult > 1) {
+          const dayPts = yLedger
+            .filter(r => r.member_name === m.name && r.source === "task_complete" && dayOf(r.created_at) === yesterday)
+            .reduce((s2, r) => s2 + Number(r.points || 0), 0);
+          const bonus = dayPts > 0 ? Math.round(dayPts * (mult - 1) * 10) / 10 : 0;
+
+          if (bonus > 0) {
+            const dup = await api(`score_ledger?ref=eq.${encodeURIComponent(refP)}&source=eq.pressure&select=id`);
+            if (dup.length === 0) {
+              if (!dryRun) {
+                await api("score_ledger", "POST", {
+                  member_name: m.name, month: yLabel, points: bonus, source: "pressure",
+                  ref: refP, created_by: "🤖 تلقائي",
+                  reason: `نقاط ضغط · ${pLabel} · +${Math.round((mult - 1) * 100)}٪ على نقاط تاسكات ${yesterday}`,
+                });
+                await notifyOnce(m.name, "نقاط ضغط",
+                  `💪 الضغط امبارح كان ${pLabel} · اتضافلك ${Math.round((mult - 1) * 100)}٪ على نقاط تاسكات اليوم · +${bonus} نقطة`);
+              }
+              pressureNotes.push(`${m.name}: ${pLabel} (${pScore}) → +${bonus}`);
+            }
+          } else {
+            pressureNotes.push(`${m.name}: ${pLabel} (${pScore}) — مفيش إنجاز فمفيش نقاط`);
+          }
+        }
+      }
+    }
+
     // ── (ب) التقرير الأسبوعي — كل خميس ──
     let weeklySent = false;
     if (today.getDay() === 4) {
@@ -324,6 +429,7 @@ export default async function handler(req, res) {
       recurring: { rulesChecked: rules.length, createdCount: created.length, created, skipped, perRule: log },
       weeklyReport: today.getDay() === 4 ? (weeklySent ? "✅ اتبعت" : "اتبعت قبل كده النهارده") : "مش خميس النهارده",
       notifications: notices,
+      pressure: pressureNotes,
       startedAt,
     });
   } catch (e) {
