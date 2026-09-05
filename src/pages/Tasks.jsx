@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { sb, addHistory, addNotification, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH, MONTHS } from "../supabase.js";
-import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWorkHours } from "../score.js";
+import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWorkHours,
+  DIFFICULTY, loadPointsConfig, computeTaskPoints, initiativePoints, longestSessionOf } from "../score.js";
 import { speechSupported, createRecognizer, parseTranscript } from "../voice.js";
 import { activeTimer, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTime, fmtDur, fmtClock } from "../timer.js";
 
@@ -84,6 +85,8 @@ export default function Tasks({ user, voiceTrigger }) {
   const [showRate, setShowRate] = useState(null);            // التاسك اللي بتتقيّم
   const [rateForm, setRateForm] = useState({ rating: "", positive: "", negative: "" });
   const [savingRate, setSavingRate] = useState(false);
+  const [ptsCfg, setPtsCfg] = useState(null);
+  const [breakdown, setBreakdown] = useState(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -104,6 +107,7 @@ export default function Tasks({ user, voiceTrigger }) {
     title: "", project_id: "", assigned_to: user.name, helpers: [],
     task_type: "Keyword Research", status: "todo", priority: "medium",
     month: CURRENT_MONTH, task_date: today, due_date: today, notes: "", attachments: "",
+    difficulty: "medium",
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -113,7 +117,7 @@ export default function Tasks({ user, voiceTrigger }) {
     width: "100%", direction: "rtl",
   };
 
-  useEffect(() => { loadAll(); loadWorkHours(); }, [selectedMonth]);
+  useEffect(() => { loadAll(); loadWorkHours(); loadPointsConfig().then(setPtsCfg); }, [selectedMonth]);
 
   // ── التايمر الشغال + العداد ──
   useEffect(() => { activeTimer(user.name).then(setTimer); }, [user.name]);
@@ -202,6 +206,7 @@ export default function Tasks({ user, voiceTrigger }) {
       status: "todo", priority: form.priority, month: form.month,
       due_date: form.task_date || null, task_date: form.task_date || null,
       notes: form.notes, attachments: form.attachments, created_by: user.name,
+      difficulty: form.difficulty || "medium",
       helpers: form.helpers.length ? form.helpers.join(", ") : null,
     };
     const res = await sb("tasks", "POST", payload);
@@ -240,6 +245,9 @@ export default function Tasks({ user, voiceTrigger }) {
   async function updateStatus(task, newStatus) {
     const updates = { status: newStatus };
     if (newStatus === "in_progress" && !task.started_at) updates.started_at = new Date().toISOString();
+    if (newStatus === "needs_revision") {
+      await sb(`tasks?id=eq.${task.id}`, "PATCH", { revision_count: Number(task.revision_count || 0) + 1 });
+    }
     if (newStatus === "completed") {
       const isLate = task.due_date && task.due_date.slice(0,10) < today;
       if (isLate) { setShowDelay(task); return; }
@@ -249,15 +257,10 @@ export default function Tasks({ user, voiceTrigger }) {
     await addHistory(task.id, "status_changed", user.name, `${STATUS_CONFIG[task.status]?.label} → ${STATUS_CONFIG[newStatus]?.label}`);
     if (newStatus === "completed") {
       await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
-      await replaceTaskScore({
-        member: task.assigned_to, month: task.month || monthLabelOf(),
-        points: SCORE.taskComplete, source: "task_complete",
-        reason: `إكمال: ${task.title}`, taskId: task.id, by: user.name,
-      });
       if (timer && String(timer.task_id) === String(task.id)) { await stopTimer(user.name); setTimer(null); }
       const hadTime = await taskHasTime(task.id);
       if (!hadTime && task.assigned_to === user.name) await noticeClosedWithoutTime(task, user.name);
-      if (task.assigned_to === user.name) setCelebrate(`تاسك خلصت 🎉  +${SCORE.taskComplete} نقطة`);
+      await awardTaskPoints(task);
     }
     if (newStatus === "pending_review") await addNotification("هدير", `👁 ${user.name} أرسل للمراجعة: ${task.title}`, "review", task.id);
     await loadAll();
@@ -268,12 +271,7 @@ export default function Tasks({ user, voiceTrigger }) {
     await sb(`tasks?id=eq.${task.id}`, "PATCH", { status: "completed", completed_at: new Date().toISOString(), delay_reason: delayReason });
     await addHistory(task.id, "completed", user.name, delayReason ? `مكتمل مع تأخير: ${delayReason}` : "مكتمل في الموعد");
     await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
-    await replaceTaskScore({
-      member: task.assigned_to, month: task.month || monthLabelOf(),
-      points: SCORE.taskComplete, source: "task_complete",
-      reason: `إكمال: ${task.title}`, taskId: task.id, by: user.name,
-    });
-    if (task.assigned_to === user.name) setCelebrate(`تاسك خلصت 🎉  +${SCORE.taskComplete} نقطة`);
+    await awardTaskPoints(task);
     setShowDelay(null); setDelayReason(""); await loadAll(); setShowDetail(null);
   }
 
@@ -294,6 +292,60 @@ export default function Tasks({ user, voiceTrigger }) {
     await addHistory(task.id, "deliverable_added", user.name, deliverUrl || deliverNote);
     setShowDeliver(null); setDeliverUrl(""); setDeliverNote(""); await loadAll();
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
+  }
+
+  // ═══ حساب وصرف نقاط التاسك بالمعادلة ═══
+  async function awardTaskPoints(task) {
+    const cfg = ptsCfg || await loadPointsConfig();
+    const month = task.month || monthLabelOf();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const longest = await longestSessionOf(task.id);
+
+    const ctx = {
+      completedDate: todayStr,
+      dueDate: task.due_date ? String(task.due_date).slice(0, 10) : null,
+      hadRevision: Number(task.revision_count || 0) > 0,
+      fullData: !!(String(task.attachments || "").trim() && String(task.notes || "").trim()),
+      longestSession: longest,
+      sameMinute: task.created_at ? (Date.now() - new Date(task.created_at)) < 120000 : false,
+    };
+
+    const res = computeTaskPoints(task, ctx, cfg);
+
+    await replaceTaskScore({
+      member: task.assigned_to, month, source: "task_complete",
+      points: res.total, reason: `إتمام تاسك «${task.title}»`,
+      taskId: task.id, by: user.name,
+    });
+
+    const ini = initiativePoints(task, ctx, cfg);
+    if (ini) {
+      await replaceTaskScore({
+        member: ini.member, month, source: "manual",
+        points: ini.points,
+        reason: ini.self ? `مبادرة: سجّلت «${task.title}» بنفسك` : `مبادرة: ضفت «${task.title}» لـ${task.assigned_to}`,
+        taskId: task.id, by: user.name,
+      });
+      if (!ini.self && ini.member) {
+        await addNotification(ini.member, `➕ ${task.assigned_to} خلّص التاسك اللي إنت ضفتهاله · +${ini.points} نقطة`, "info", task.id);
+      }
+      if (ini.self) {
+        res.lines.push({ label: "إنت اللي ضفت التاسك دي", value: ini.points });
+        res.total = Math.round((res.total + ini.points) * 10) / 10;
+      } else {
+        res.lines.push({ label: `نقطة المبادرة راحت لـ${ini.member}`, value: 0 });
+      }
+    }
+
+    await sb(`tasks?id=eq.${task.id}`, "PATCH", {
+      points_awarded: res.total,
+      longest_session_minutes: longest,
+      points_breakdown: res.lines.map(l => `${l.label} = ${l.value}`).join(" | "),
+    });
+
+    if (task.assigned_to === user.name) {
+      setBreakdown({ title: task.title, total: res.total, lines: res.lines });
+    }
   }
 
   // ═══ حفظ التقييم والفيدباك (للمدير) ═══
@@ -672,6 +724,23 @@ export default function Tasks({ user, voiceTrigger }) {
                   </select>
                 </div>
               </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>مستوى الصعوبة</div>
+                <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 6 }}>بيأثر على نقاط التاسك · الافتراضي متوسطة</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {DIFFICULTY.map(d => {
+                    const on = (form.difficulty || "medium") === d.v;
+                    return (
+                      <button key={d.v} type="button" onClick={() => setForm(f => ({ ...f, difficulty: d.v }))}
+                        style={{ flex: 1, minWidth: 74, padding: "8px 6px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#EFF6FF" : "#F8FAFC", color: on ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                        {d.l}<div style={{ fontSize: 9, marginTop: 2 }}>×{ptsCfg ? ptsCfg[d.key] : d.def}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <HelperPicker value={form.helpers} owner={form.assigned_to} onChange={v => setForm(f => ({ ...f, helpers: v }))} />
               <div>
                 <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>ملاحظات</div>
@@ -802,6 +871,26 @@ export default function Tasks({ user, voiceTrigger }) {
                   )}
 
                   {/* زرار التقييم — للمدير */}
+                  {(showDetail.points_awarded != null || showDetail.difficulty) && (
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                      {showDetail.difficulty && (
+                        <span style={{ fontSize: 11, background: "#F8FAFC", border: "1px solid #E2E8F0", color: "#64748B", padding: "3px 10px", borderRadius: 8 }}>
+                          صعوبة: {(DIFFICULTY.find(d => d.v === showDetail.difficulty) || {}).l || showDetail.difficulty}
+                        </span>
+                      )}
+                      {showDetail.points_awarded != null && (
+                        <span style={{ fontSize: 11, background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "3px 10px", borderRadius: 8, fontWeight: 700 }}>
+                          ⭐ +{showDetail.points_awarded} نقطة
+                        </span>
+                      )}
+                      {Number(showDetail.revision_count) > 0 && (
+                        <span style={{ fontSize: 11, background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "3px 10px", borderRadius: 8 }}>
+                          🔁 {showDetail.revision_count} ريفيجن
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* التايمر */}
                   {(showDetail.assigned_to === user.name || parseHelpers(showDetail.helpers).includes(user.name)) && showDetail.status !== "completed" && (
                     <div style={{ marginBottom: 14 }}>
@@ -1167,6 +1256,39 @@ export default function Tasks({ user, voiceTrigger }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ تفصيل النقاط بعد الإتمام ═══ */}
+      {breakdown && (
+        <div onClick={() => setBreakdown(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 520, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" onClick={e => e.stopPropagation()}
+            style={{ background: "#FFFFFF", borderRadius: 22, padding: 24, width: "100%", maxWidth: 400, boxShadow: "0 16px 50px rgba(15,23,42,0.25)" }}>
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 40, marginBottom: 6 }}>🎉</div>
+              <div style={{ fontSize: 14, color: "#64748B" }}>خلصت «{breakdown.title}»</div>
+              <div style={{ fontSize: 38, fontWeight: 800, color: "#059669", lineHeight: 1.2 }}>+{breakdown.total}</div>
+              <div style={{ fontSize: 12, color: "#94A3B8" }}>نقطة في رصيدك</div>
+            </div>
+
+            <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 14, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8 }}>النقط جت منين</div>
+              {breakdown.lines.map((l, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: i < breakdown.lines.length - 1 ? "1px solid #E2E8F0" : "none" }}>
+                  <span style={{ flex: 1, fontSize: 12, color: "#0F172A", lineHeight: 1.5 }}>{l.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: l.value > 0 ? "#059669" : l.value < 0 ? "#DC2626" : "#94A3B8", flexShrink: 0 }}>
+                    {l.value > 0 ? "+" : ""}{l.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={() => setBreakdown(null)}
+              style={{ width: "100%", background: "linear-gradient(135deg,#059669,#047857)", color: "#fff", padding: 13, borderRadius: 12, fontSize: 15, fontWeight: 700 }}>
+              يلا اللي بعدها
+            </button>
           </div>
         </div>
       )}
