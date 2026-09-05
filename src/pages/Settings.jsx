@@ -5,6 +5,7 @@ import { WEEKDAYS, loadWorkConfig, saveWorkingDays, countWorkingDays } from "../
 const TABS = [
   ["calendar",  "📆 تقويم الشغل"],
   ["targets",   "🎯 الأهداف والعتبات"],
+  ["points",    "⭐ النقاط"],
   ["content",   "💬 الرسائل والمحتوى"],
   ["team",      "👥 الفريق والصلاحيات"],
   ["recurring", "🔄 التاسكات المتكررة"],
@@ -32,6 +33,38 @@ const THRESHOLDS = [
   ["leave_max_per_day",     "أقصى عدد في إجازة نفس اليوم",      "", "شخص"],
 ];
 
+const POINTS = [
+  ["الأساس", [
+    ["pts_base", "نقاط الأساس", "الرقم اللي بيتضرب في المعاملات"],
+  ]],
+  ["معاملات الأولوية", [
+    ["pts_prio_low",    "منخفضة", ""],
+    ["pts_prio_medium", "متوسطة", ""],
+    ["pts_prio_high",   "عالية",  ""],
+    ["pts_prio_urgent", "عاجلة",  ""],
+  ]],
+  ["معاملات الصعوبة", [
+    ["pts_diff_easy",      "سهلة",      ""],
+    ["pts_diff_medium",    "متوسطة",    ""],
+    ["pts_diff_hard",      "صعبة",      ""],
+    ["pts_diff_very_hard", "صعبة جداً", ""],
+  ]],
+  ["الإضافات والخصم", [
+    ["pts_bonus_early",       "سلّمها قبل الموعد",        "بتتضاف على المجموع"],
+    ["pts_bonus_no_revision", "من غير ريفيجن",            ""],
+    ["pts_bonus_full_data",   "بياناتها كاملة عند التسليم","روابط + ملاحظات"],
+    ["pts_penalty_late",      "اتسلّمت بعد الموعد",       "اكتبيها بالسالب"],
+  ]],
+  ["الجلسة المتصلة", [
+    ["pts_session_2h", "شغل متواصل ساعتين",  ""],
+    ["pts_session_4h", "شغل متواصل 4 ساعات", "بديلة مش مضافة للساعتين"],
+  ]],
+  ["المبادرة", [
+    ["pts_initiative_self",  "ضاف تاسك لنفسه",  "بتتصرف عند الإتمام مش الإضافة"],
+    ["pts_initiative_other", "ضاف تاسك لزميل",  "بتروح للي ضاف"],
+  ]],
+];
+
 const FEATURES = [
   ["feature_mood",            "☀️ مودك النهارده",           "صفحة المود والسؤال اليومي"],
   ["feature_motivation",      "💬 الرسائل التحفيزية",        "الرسائل التلقائية حسب الأداء"],
@@ -40,6 +73,8 @@ const FEATURES = [
   ["feature_morning",         "🌅 قسم صباحك في الرئيسية",    "القسم الصباحي أول الصفحة"],
   ["feature_old_notif_alert", "🔔 تنبيه الإشعارات القديمة",  "التنبيه الجانبي"],
   ["feature_draws",           "🎁 السحب العشوائي",           "نافذة السحب المفاجئ"],
+  ["feature_initiative",      "➕ نقاط المبادرة",             "نقطة لمن يضيف تاسك تتنفذ"],
+  ["feature_session_points",  "⏱ نقاط الجلسة المتصلة",       "الشغل المتواصل ساعتين أو 4"],
 ];
 
 export default function Settings({ user }) {
@@ -345,6 +380,37 @@ export default function Settings({ user }) {
               </div>
             ))}
           </div>
+        </>
+      )}
+
+      {tab === "points" && (
+        <>
+          <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 12, padding: "12px 15px", fontSize: 12, color: "#2563EB", marginBottom: 16, lineHeight: 1.9 }}>
+            📐 <b>المعادلة:</b> (الأساس × معامل الأولوية × معامل الصعوبة) + الإضافات
+            <div style={{ fontSize: 11, color: "#64748B", marginTop: 6 }}>
+              مثال: تاسك عاجلة صعبة، قبل ميعادها وبدون ريفيجن ← 5 × 1.6 × 1.4 = 11.2 + 2 + 2 = <b>15.2 نقطة</b>
+            </div>
+            <div style={{ fontSize: 11, color: "#DC2626", marginTop: 6 }}>
+              ⚠️ أي تعديل بيتطبق من وقته بس — النقاط القديمة مبتتحسبش تاني
+            </div>
+          </div>
+
+          {POINTS.map(([group, rows]) => (
+            <div key={group} style={card}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 10 }}>{group}</div>
+              {rows.map(([key, name, hint]) => (
+                <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F1F5F9", padding: "8px 0", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 150 }}>
+                    <div style={{ fontSize: 13, color: "#0F172A", fontWeight: 600 }}>{name}</div>
+                    {hint && <div style={{ fontSize: 11, color: "#94A3B8" }}>{hint}</div>}
+                  </div>
+                  <input type="number" step="0.1" defaultValue={settings[key] == null ? "" : settings[key]}
+                    onBlur={e => saveSetting(key, e.target.value, `${group} — ${name}`)}
+                    style={{ ...inp, width: 90, padding: "6px 10px", fontSize: 13 }} />
+                </div>
+              ))}
+            </div>
+          ))}
         </>
       )}
 
