@@ -136,6 +136,13 @@ export const DEFAULT_PTS = {
   pts_session_2h: 2, pts_session_4h: 4,
   pts_initiative_self: 1, pts_initiative_other: 1,
   feature_initiative: 1, feature_session_points: 1,
+  // معدلات الساعات ومؤشر الضغط
+  pts_hour_normal: 0.5, pts_hour_extra: 1, pts_hour_training: 1.5,
+  press_mult_high: 1.25, press_mult_very: 1.5,
+  press_th_high: 5, press_th_very: 10,
+  // مستويات الأثر ونقاط الزميل
+  impact_small: 10, impact_medium: 15, impact_big: 25,
+  pts_peer_share: 5,
 };
 
 // تحميل قيم المعادلة من الإعدادات
