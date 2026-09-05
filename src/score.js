@@ -236,3 +236,54 @@ export async function longestSessionOf(taskId) {
   if (!rows || rows.length === 0) return 0;
   return Math.max(0, ...rows.map(r => Number(r.duration_minutes) || 0));
 }
+
+// ═══════════════════════════════════════════════════
+//  مؤشر الضغط اليومي (تعديل ٥٢) — تلقائي بالكامل
+// ═══════════════════════════════════════════════════
+
+export const DEFAULT_PRESS = {
+  press_th_high: 5, press_th_very: 10,
+  press_mult_high: 1.25, press_mult_very: 1.5,
+  press_w_open: 1, press_w_due: 2, press_w_urgent: 2, press_w_hours: 2,
+  pts_hour_normal: 0.5, pts_hour_extra: 1, pts_hour_training: 1.5,
+  feature_pressure: 1, feature_hour_points: 1,
+};
+
+// ── حساب المؤشر من 4 عوامل ──
+export function pressureIndex(input, cfg = DEFAULT_PRESS) {
+  const c = { ...DEFAULT_PRESS, ...(cfg || {}) };
+  const { openTasks = 0, dueSoon = 0, urgent = 0, dayMinutes = 0, avgMinutes = 0 } = input;
+
+  let score = 0;
+  score += openTasks * Number(c.press_w_open);
+  score += dueSoon   * Number(c.press_w_due);
+  score += urgent    * Number(c.press_w_urgent);
+  if (avgMinutes > 0 && dayMinutes > avgMinutes * 1.25) score += Number(c.press_w_hours);
+
+  score = Math.round(score * 10) / 10;
+
+  if (score >= Number(c.press_th_very)) {
+    return { score, level: "very", label: "عالي جداً", multiplier: Number(c.press_mult_very) };
+  }
+  if (score >= Number(c.press_th_high)) {
+    return { score, level: "high", label: "مرتفع", multiplier: Number(c.press_mult_high) };
+  }
+  return { score, level: "normal", label: "عادي", multiplier: 1 };
+}
+
+// ── النقاط الإضافية: نسبة على نقاط تاسكات اليوم اللي اتنفذت فعلاً ──
+export function pressureBonus(dayTaskPoints, press) {
+  if (!press || press.multiplier <= 1) return 0;
+  if (!dayTaskPoints || dayTaskPoints <= 0) return 0;   // ضغط بدون إنجاز = مفيش
+  return Math.round(dayTaskPoints * (press.multiplier - 1) * 10) / 10;
+}
+
+// ── نقاط الساعات (تعديل ٤٧) ──
+export function hourPoints({ normalMinutes = 0, extraMinutes = 0, trainingMinutes = 0 }, cfg = DEFAULT_PRESS) {
+  const c = { ...DEFAULT_PRESS, ...(cfg || {}) };
+  const n = (normalMinutes / 60) * Number(c.pts_hour_normal);
+  const e = (extraMinutes / 60) * Number(c.pts_hour_extra);
+  const t = (trainingMinutes / 60) * Number(c.pts_hour_training);
+  const round = x => Math.round(x * 10) / 10;
+  return { normal: round(n), extra: round(e), training: round(t), total: round(n + e + t) };
+}
