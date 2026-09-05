@@ -244,12 +244,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     setTranscript(""); setParsed(null); setVoiceErr(""); setVoiceOpen(true);
   }, [voiceTrigger]);
 
-  // الاحتفال يختفي لوحده بعد 3.5 ثانية
-  useEffect(() => {
-    if (!celebrate) return;
-    const t = setTimeout(() => setCelebrate(null), 3500);
-    return () => clearTimeout(t);
-  }, [celebrate]);
+  // الاحتفال بيفضل ظاهر لحد ما العضو يقفله بنفسه (تعديل ١٤)
 
   async function loadWorkHours() {
     const rows = await sb("app_settings?select=key,value");
@@ -1493,37 +1488,19 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
         </div>
       )}
 
-      {/* ═══ الاحتفال ═══ */}
+      {/* ═══ الاحتفال بالإنجاز — زاوية الشاشة، مايختفيش لوحده (تعديل ١٤) ═══ */}
       {celebrate && (
-        <div onClick={() => setCelebrate(null)}
-          style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "auto", background: "rgba(15,23,42,0.25)" }}>
-          <style>{`
-            @keyframes smFly {
-              0%   { transform: translate(0,0) scale(0.4) rotate(0deg); opacity: 0; }
-              15%  { opacity: 1; }
-              100% { transform: translate(var(--dx), var(--dy)) scale(1.15) rotate(var(--rot)); opacity: 0; }
-            }
-            @keyframes smPop {
-              0%   { transform: scale(0.7); opacity: 0; }
-              50%  { transform: scale(1.04); opacity: 1; }
-              100% { transform: scale(1); opacity: 1; }
-            }
-          `}</style>
-          {["🎉","⭐","💙","✨","🎊","🏆","👏","💫","🌟","🎈","✅","💪"].map((emo, i) => {
-            const ang = (i / 12) * Math.PI * 2;
-            return (
-              <span key={i} style={{
-                position: "absolute", fontSize: 30, left: "50%", top: "50%",
-                "--dx": `${Math.cos(ang) * 220}px`,
-                "--dy": `${Math.sin(ang) * 200}px`,
-                "--rot": `${(i % 2 ? 1 : -1) * 240}deg`,
-                animation: `smFly 1.5s ease-out ${i * 0.05}s forwards`,
-              }}>{emo}</span>
-            );
-          })}
-          <div style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 20, padding: "24px 32px", textAlign: "center", boxShadow: "0 12px 40px rgba(15,23,42,0.2)", animation: "smPop 0.4s ease-out forwards", maxWidth: 320 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", lineHeight: 1.7 }}>{celebrate}</div>
-            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>اضغطي في أي حتة للإخفاء</div>
+        <div style={{ position: "fixed", bottom: 18, left: 18, zIndex: 500, maxWidth: 300 }}>
+          <div style={{ background: "#FFFFFF", border: "2px solid #FDE68A", borderRadius: 18, padding: "16px 18px", boxShadow: "0 10px 34px rgba(15,23,42,0.18)", position: "relative" }}>
+            <button onClick={() => setCelebrate(null)}
+              style={{ position: "absolute", top: 6, left: 8, background: "none", color: "#94A3B8", fontSize: 15 }}>✕</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 30 }}>🎉</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A", lineHeight: 1.7 }}>{celebrate}</div>
+                <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4 }}>اضغطي ✕ لما تخلصي</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
