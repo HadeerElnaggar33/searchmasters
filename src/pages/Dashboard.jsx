@@ -3,6 +3,7 @@ import { sb, STATUS_CONFIG, PRIORITY_CONFIG, timeAgo, formatDate, CURRENT_MONTH 
 import { loadWorkConfig, isWorkingDay, countWorkingDays } from "../workdays.js";
 import { loadLedger, totalsFrom, rankMembers } from "../score.js";
 import { presenceOf } from "../timer.js";
+import { loadStickers, matching } from "../stickers.js";
 
 const C = {
   card: { background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 16, padding: "16px 14px", boxShadow: "0 1px 4px rgba(15,23,42,0.06)" },
@@ -58,6 +59,8 @@ export default function Dashboard({ user, onNavigate }) {
   const [answerPick, setAnswerPick] = useState("");
   const [morningOpen, setMorningOpen] = useState(true);
   const [savingMood, setSavingMood] = useState(false);
+  const [stickers, setStickers] = useState([]);
+  const [stickerPick, setStickerPick] = useState(null);
 
   const today = toISO(new Date());
   const isAdmin = user.role === "admin" || user.role === "team_leader";
@@ -69,7 +72,7 @@ export default function Dashboard({ user, onNavigate }) {
     const yy = new Date().getFullYear();
     const lastD = new Date(yy, new Date().getMonth() + 1, 0).getDate();
 
-    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv] = await Promise.all([
+    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv, sk] = await Promise.all([
       sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&order=created_at.desc`),
       sb("team_members?is_active=eq.true&order=name"),
       sb(`attendance?date=eq.${today}&order=created_at`),
@@ -87,6 +90,7 @@ export default function Dashboard({ user, onNavigate }) {
       sb("day_sentences?is_active=eq.true"),
       sb(`draws?status=eq.won&winner_name=eq.${encodeURIComponent(user.name)}&select=id,gift_name,won_at`),
       sb("leave_requests?status=eq.pending&order=created_at"),
+      loadStickers(),
     ]);
 
     if (t) setTasks(t);
@@ -106,6 +110,7 @@ export default function Dashboard({ user, onNavigate }) {
     if (ds) setSentences(ds);
     if (gf) setGifts(gf);
     if (lv) setLeaves(lv);
+    if (sk) setStickers(sk);
     setLoading(false);
   }
 
@@ -260,6 +265,7 @@ export default function Dashboard({ user, onNavigate }) {
 
   const dueToday = myTasks.filter(t => String(t.due_date || "").slice(0, 10) === today && t.status !== "completed");
 
+  const moodStickers = matching(stickers, "mood", null);
   const nav = (page, filter) => onNavigate && onNavigate(page, filter);
   const myNomOf = name => {
     const r = allNoms.find(x => x.member_name === name);
@@ -297,14 +303,29 @@ export default function Dashboard({ user, onNavigate }) {
           {daySentence && <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.8, marginBottom: 14 }}>{daySentence.text}</div>}
 
           <div style={{ fontSize: 12, color: "#64748B", marginBottom: 6, fontWeight: 600 }}>مودك النهارده</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-            {MOODS.map(m => (
-              <button key={m} onClick={() => setMoodPick(moodPick === m ? "" : m)}
-                style={{ padding: "8px 12px", borderRadius: 20, border: `2px solid ${moodPick === m ? "#7C3AED" : "#E2E8F0"}`, background: moodPick === m ? "#F5F3FF" : "#FFFFFF", color: moodPick === m ? "#7C3AED" : "#64748B", fontSize: 13, fontWeight: moodPick === m ? 700 : 500 }}>
-                {m}
-              </button>
-            ))}
-          </div>
+          {moodStickers.length > 0 ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              {moodStickers.map(x => {
+                const on = stickerPick && String(stickerPick.id) === String(x.id);
+                return (
+                  <button key={x.id} onClick={() => { setStickerPick(on ? null : x); setMoodPick(on ? "" : x.name); }}
+                    title={x.name}
+                    style={{ padding: 6, borderRadius: 14, border: `2px solid ${on ? "#7C3AED" : "#E2E8F0"}`, background: on ? "#F5F3FF" : "#FFFFFF" }}>
+                    <img src={x.image_url} alt={x.name} style={{ width: 46, height: 46, objectFit: "contain", display: "block" }} />
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+              {MOODS.map(m => (
+                <button key={m} onClick={() => setMoodPick(moodPick === m ? "" : m)}
+                  style={{ padding: "8px 12px", borderRadius: 20, border: `2px solid ${moodPick === m ? "#7C3AED" : "#E2E8F0"}`, background: moodPick === m ? "#F5F3FF" : "#FFFFFF", color: moodPick === m ? "#7C3AED" : "#64748B", fontSize: 13, fontWeight: moodPick === m ? 700 : 500 }}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
 
           {todayQuestion && (
             <>
