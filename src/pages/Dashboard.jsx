@@ -305,22 +305,34 @@ export default function Dashboard({ user, onNavigate }) {
           <div style={{ fontSize: 17, fontWeight: 800, color: "#2563EB", marginBottom: 4 }}>{greeting} يا {user.name} ☀️</div>
           {daySentence && <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.8, marginBottom: 14 }}>{daySentence.text}</div>}
 
-          <div style={{ fontSize: 12, color: "#64748B", marginBottom: 6, fontWeight: 600 }}>مودك النهارده</div>
+          <div style={{ fontSize: 12, color: "#64748B", marginBottom: 10, fontWeight: 600, textAlign: "center" }}>مودك النهارده</div>
           {moodStickers.length > 0 ? (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-              {moodStickers.map(x => {
-                const on = stickerPick && String(stickerPick.id) === String(x.id);
-                return (
-                  <button key={x.id} onClick={() => { setStickerPick(on ? null : x); setMoodPick(on ? "" : x.name); }}
-                    title={x.name}
-                    style={{ padding: 6, borderRadius: 14, border: `2px solid ${on ? "#7C3AED" : "#E2E8F0"}`, background: on ? "#F5F3FF" : "#FFFFFF" }}>
-                    <img src={x.image_url} alt={x.name} style={{ width: 46, height: 46, objectFit: "contain", display: "block" }} />
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 8, justifyContent: "center" }}>
+                {moodStickers.map(x => {
+                  const on = stickerPick && String(stickerPick.id) === String(x.id);
+                  return (
+                    <button key={x.id} onClick={() => { setStickerPick(on ? null : x); setMoodPick(on ? "" : x.name); }}
+                      title={x.name}
+                      style={{
+                        padding: 8, borderRadius: 20,
+                        border: `3px solid ${on ? "#7C3AED" : "transparent"}`,
+                        background: on ? "#F5F3FF" : "transparent",
+                        transform: on ? "scale(1.06)" : "scale(1)",
+                        transition: "transform .15s, border-color .15s",
+                      }}>
+                      <img src={x.image_url} alt={x.name}
+                        style={{ width: 104, height: 104, objectFit: "contain", display: "block", borderRadius: 14 }} />
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ textAlign: "center", fontSize: 13, fontWeight: 700, color: stickerPick ? "#7C3AED" : "#94A3B8", marginBottom: 14, minHeight: 20 }}>
+                {stickerPick ? stickerPick.name : "اختار اللي على مودك"}
+              </div>
+            </>
           ) : (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, justifyContent: "center" }}>
               {MOODS.map(m => (
                 <button key={m} onClick={() => setMoodPick(moodPick === m ? "" : m)}
                   style={{ padding: "8px 12px", borderRadius: 20, border: `2px solid ${moodPick === m ? "#7C3AED" : "#E2E8F0"}`, background: moodPick === m ? "#F5F3FF" : "#FFFFFF", color: moodPick === m ? "#7C3AED" : "#64748B", fontSize: 13, fontWeight: moodPick === m ? 700 : 500 }}>
@@ -332,8 +344,8 @@ export default function Dashboard({ user, onNavigate }) {
 
           {todayQuestion && (
             <>
-              <div style={{ fontSize: 13, color: "#0F172A", marginBottom: 6, fontWeight: 600 }}>{todayQuestion.text}</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={{ fontSize: 13, color: "#0F172A", marginBottom: 8, fontWeight: 600, textAlign: "center" }}>{todayQuestion.text}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14, justifyContent: "center" }}>
                 {String(todayQuestion.options || "").split(",").map(x => x.trim()).filter(Boolean).map(o => (
                   <button key={o} onClick={() => setAnswerPick(answerPick === o ? "" : o)}
                     style={{ padding: "7px 12px", borderRadius: 20, border: `2px solid ${answerPick === o ? "#2563EB" : "#E2E8F0"}`, background: answerPick === o ? "#EFF6FF" : "#FFFFFF", color: answerPick === o ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: answerPick === o ? 700 : 500 }}>
