@@ -50,6 +50,9 @@ export default function Dashboard({ user, onNavigate }) {
   const [tab, setTab] = useState(() => localStorage.getItem("sm_home_tab") || "mine");
   const [leaves, setLeaves] = useState([]);
   const [helpOpenReqs, setHelpOpenReqs] = useState([]);
+  const [clapToday, setClapToday] = useState(null);
+  const [clapCount, setClapCount] = useState(0);
+  const [clapping, setClapping] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // قسم صباحك
@@ -73,7 +76,7 @@ export default function Dashboard({ user, onNavigate }) {
     const yy = new Date().getFullYear();
     const lastD = new Date(yy, new Date().getMonth() + 1, 0).getDate();
 
-    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv, sk, hr] = await Promise.all([
+    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv, sk, hr, cl] = await Promise.all([
       sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&order=created_at.desc`),
       sb("team_members?is_active=eq.true&order=name"),
       sb(`attendance?date=eq.${today}&order=created_at`),
@@ -93,6 +96,7 @@ export default function Dashboard({ user, onNavigate }) {
       sb("leave_requests?status=eq.pending&order=created_at"),
       loadStickers(),
       sb("help_requests?status=eq.open&order=created_at.desc"),
+      sb("clap_log?select=from_member,to_member,clap_date"),
     ]);
 
     if (t) setTasks(t);
@@ -114,6 +118,10 @@ export default function Dashboard({ user, onNavigate }) {
     if (lv) setLeaves(lv);
     if (sk) setStickers(sk);
     if (hr) setHelpOpenReqs(hr);
+    if (cl) {
+      setClapToday(cl.find(x => x.from_member === user.name && String(x.clap_date).slice(0, 10) === today) || null);
+      setClapCount(cl.length);
+    }
     setLoading(false);
   }
 
@@ -143,6 +151,27 @@ export default function Dashboard({ user, onNavigate }) {
   }
 
   function switchTab(v) { setTab(v); localStorage.setItem("sm_home_tab", v); }
+
+  // ═══ ميدالية التطبيل (تعديل ٩) — نقاط ترفيهية بالكامل ═══
+  async function sendClap() {
+    if (clapToday || clapping) return;
+    const admin = members.find(m => m.role === "admin");
+    if (!admin) { alert("مفيش مدير مسجّل"); return; }
+    setClapping(true);
+    const res = await sb("clap_log", "POST", {
+      from_member: user.name, to_member: admin.name, clap_date: today,
+      message: `${user.name} طبّل للمدير 👏`,
+    });
+    if (!res) { setClapping(false); alert("طبّلتي النهاردة خلاص — بكرة تاني 👏"); return; }
+    for (const m of members) {
+      await sb("notifications", "POST", {
+        recipient: m.name, type: "info",
+        content: `👏 ${user.name} طبّل لـ${admin.name}`,
+      });
+    }
+    setClapping(false);
+    await loadAll();
+  }
 
   // ── قرارات سريعة من تبويب فريقي ──
   async function decideLeave(req, ok) {
@@ -623,6 +652,20 @@ export default function Dashboard({ user, onNavigate }) {
               alert={alerts.hours} onClick={() => nav("hours")} color={hoursPct < hoursThreshold ? "#DC2626" : "#0F172A"} />
 
             <AchRow icon="🎖" label="الميداليات" value={`${medalCount} من ${medalTotal}`} onClick={() => nav("badges")} color="#7C3AED" />
+
+            <button onClick={sendClap} disabled={!!clapToday || clapping}
+              style={{ width: "100%", textAlign: "right", background: clapToday ? "#ECFDF5" : "#FFFBEB", border: `1px solid ${clapToday ? "#A7F3D0" : "#FDE68A"}`, borderRadius: 12, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, cursor: clapToday ? "default" : "pointer" }}>
+              <span style={{ fontSize: 17 }}>👏</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: "#64748B" }}>ميدالية التطبيل للمدير</div>
+                <div style={{ fontSize: 10, color: "#94A3B8" }}>
+                  {clapToday ? "طبّلت النهاردة 👏 · بكرة تاني" : "مرة واحدة في اليوم · ترفيهية بالكامل"}
+                </div>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 800, color: clapToday ? "#059669" : "#D97706" }}>
+                {clapToday ? "✓ اتبعتت" : "طبّل"}
+              </span>
+            </button>
 
             <AchRow icon="🎁" label="جايزة الأسبوع"
               value={wonThisWeek.length > 0 ? "خدتها" : "لسه"}
