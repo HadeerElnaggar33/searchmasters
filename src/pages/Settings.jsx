@@ -268,8 +268,13 @@ export default function Settings({ user }) {
     if (stForm.places.length === 0) { alert("حددي مكان ظهور واحد على الأقل"); return; }
     if (stFile.size > 400 * 1024) { alert("الصورة أكبر من 400 كيلوبايت — صغّريها الأول"); return; }
     setUploading(true);
-    const url = await uploadSticker(stFile, SB_URL, SB_KEY);
-    if (!url) { setUploading(false); alert("الرفع فشل — اتأكدي إن bucket اسمه awards موجود و Public"); return; }
+    const up = await uploadSticker(stFile, SB_URL, SB_KEY);
+    if (!up || up.error) {
+      setUploading(false);
+      alert("الرفع فشل — " + ((up && up.error) || "سبب غير معروف"));
+      return;
+    }
+    const url = up.url;
     await sb("stickers", "POST", {
       name: stForm.name.trim(), image_url: url, category: stForm.category,
       places: stForm.places.join(","), situation: stForm.situation, rate: stForm.rate,
