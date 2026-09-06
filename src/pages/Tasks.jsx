@@ -6,6 +6,7 @@ import { speechSupported, createRecognizer, parseTranscript } from "../voice.js"
 import { activeTimer, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTime, fmtDur, fmtClock } from "../timer.js";
 import { GRADES, IMPACT, medalPoints } from "../badges.js";
 import { loadStickers, pickSticker } from "../stickers.js";
+import { labelList } from "../utils/linkLabel.js";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
@@ -69,6 +70,9 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   const [filterAssignee, setFilterAssignee] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [filterOverdue, setFilterOverdue] = useState(false);
+  const [dayView, setDayView] = useState("today");     // today | tomorrow | week | late | kitchen | all | pick
+  const [pickedDay, setPickedDay] = useState("");
+  const [pageSize, setPageSize] = useState(40);
   const [search, setSearch] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(CURRENT_MONTH);
   const [showShift, setShowShift] = useState(null);
@@ -117,6 +121,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   // صلاحية إدارة التاسكات: يضيف ويشوف ويحذف تاسكات الفريق
   const canAssign = isAdmin || user.can_assign_tasks === true;
   const today = getTodayStr();
+  const tomorrowStr = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })();
+  const weekEndStr = (() => { const d = new Date(); d.setDate(d.getDate() + 7); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })();
 
   const emptyForm = {
     title: "", project_id: "", assigned_to: user.name, helpers: [],
@@ -270,6 +276,12 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     }
   }
 
+  // تحديث صف واحد في الذاكرة — بدل إعادة تحميل كل التاسكات
+  function patchTask(id, changes) {
+    setTasks(list => list.map(t => String(t.id) === String(id) ? { ...t, ...changes } : t));
+    setShowDetail(d => (d && String(d.id) === String(id) ? { ...d, ...changes } : d));
+  }
+
   async function loadAll() {
     setLoading(true);
     const [t, p, m] = await Promise.all([
@@ -326,6 +338,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
       title: editForm.title, notes: editForm.notes,
       attachments: editForm.attachments, due_date: editForm.due_date || null,
       priority: editForm.priority, assigned_to: editForm.assigned_to,
+      difficulty: editForm.difficulty || "medium",
       helpers: newHelpers.length ? newHelpers.join(", ") : null,
       task_type: editForm.task_type,
     });
@@ -370,7 +383,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
       await awardTaskPoints(task);
     }
     if (newStatus === "pending_review") await addNotification("هدير", `👁 ${user.name} أرسل للمراجعة: ${task.title}`, "review", task.id);
-    await loadAll();
+    patchTask(task.id, updates);
     if (showDetail?.id === task.id) openDetail({ ...task, status: newStatus });
   }
 
@@ -448,8 +461,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   async function setContentStatus(t, v) {
     await sb(`tasks?id=eq.${t.id}`, "PATCH", { content_status: v || null });
     await addHistory(t.id, "content_status", user.name, `حالة المحتوى: ${v || "بدون"}`);
-    await loadAll();
-    if (showDetail && showDetail.id === t.id) openDetail({ ...t, content_status: v || null });
+    patchTask(t.id, { content_status: v || null });
   }
 
   // ═══ طلب نجدة «الحقوني» (تعديل ٢٨ + ٣٧) ═══
@@ -546,6 +558,13 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
 
   // ═══ حساب وصرف نقاط التاسك بالمعادلة ═══
   async function awardTaskPoints(task) {
+    // تاسكات المطبخ (من غير تاريخ تسليم) مستبعدة من النقاط
+    if (!task.due_date) {
+      if (task.assigned_to === user.name) {
+        setBreakdown({ title: task.title, total: 0, lines: [{ label: "تاسك من المطبخ — من غير تاريخ تسليم، فمفيش نقاط", value: 0 }] });
+      }
+      return;
+    }
     const cfg = ptsCfg || await loadPointsConfig();
     const month = task.month || monthLabelOf();
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -747,6 +766,24 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     setNewComment(""); openDetail(showDetail);
   }
 
+  // المطبخ: To Do + مفيش تاريخ تسليم + ليها مسؤول
+  const isKitchen = t => t.status === "todo" && !t.due_date && !!t.assigned_to;
+  const isLate = t => t.due_date && String(t.due_date).slice(0, 10) < today &&
+    t.status !== "completed" && t.status !== "cancelled";
+
+  function inDayView(t) {
+    if (dayView === "all") return true;
+    if (dayView === "kitchen") return isKitchen(t);
+    if (dayView === "late") return isLate(t);
+    if (isKitchen(t)) return false;              // المطبخ ميظهرش في باقي الفلاتر
+    const d = t.due_date ? String(t.due_date).slice(0, 10) : null;
+    if (dayView === "today")    return d === today && !isLate(t);
+    if (dayView === "tomorrow") return d === tomorrowStr;
+    if (dayView === "week")     return !!d && d >= today && d <= weekEndStr;
+    if (dayView === "pick")     return !!pickedDay && d === pickedDay;
+    return true;
+  }
+
   const filtered = tasks.filter(t => {
     // الموظف يشوف تاسكاته بس · واللي عنده صلاحية إدارة التاسكات يشوف الفريق كله
     // التاسك بتظهر للمسؤول الأساسي بس · المساعد بيتشاف اسمه عليها لكن مش في قائمته
@@ -754,7 +791,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
     if (filterAssignee !== "all" && t.assigned_to !== filterAssignee) return false;
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
-    if (filterOverdue && !(t.due_date && String(t.due_date).slice(0,10) < today && t.status !== "completed" && t.status !== "cancelled")) return false;
+    if (filterOverdue && !isLate(t)) return false;
+    if (!inDayView(t)) return false;
     if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.assigned_to?.includes(search) && !parseHelpers(t.helpers).some(h => h.includes(search))) return false;
     return true;
   });
@@ -790,6 +828,28 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   };
 
   const AttachList = ({ text }) => {
+    const items = String(text || "").split("\n").map(l => l.trim()).filter(Boolean).map(line => {
+      const parts = line.split("|");
+      return parts.length > 1
+        ? { name: parts[0].trim(), url: parts.slice(1).join("|").trim() }
+        : { name: "", url: line };
+    });
+    const labeled = labelList(items);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {labeled.map((it, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 12px" }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>{it.icon}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
+            <a href={it.url} target="_blank" rel="noreferrer"
+              style={{ fontSize: 12, color: "#2563EB", fontWeight: 600, flexShrink: 0 }}>فتح ↗</a>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const AttachListOld = ({ text }) => {
     const list = parseAttachments(text);
     if (!list.length) return null;
     return (
@@ -872,9 +932,12 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
       {loading
         ? <div style={{ textAlign: "center", padding: 40, color: "#94A3B8" }}>جاري التحميل...</div>
         : filtered.length === 0
-          ? <div style={{ textAlign: "center", padding: 60, color: "#94A3B8" }}><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div><div>لا توجد تاسكات</div></div>
+          ? <div style={{ textAlign: "center", padding: 60, color: "#94A3B8" }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>{dayView === "kitchen" ? "🍳" : "📭"}</div>
+              <div>{dayView === "today" ? "مفيش تاسكات مستحقة النهاردة" : dayView === "kitchen" ? "المطبخ فاضي" : dayView === "late" ? "مفيش تاسكات متأخرة 👏" : "لا توجد تاسكات"}</div>
+            </div>
           : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {filtered.map(task => {
+              {filtered.slice(0, pageSize).map(task => {
                 const s = STATUS_CONFIG[task.status] || STATUS_CONFIG.todo;
                 const p = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.medium;
                 const proj = projects.find(x => x.id === task.project_id);
@@ -1025,6 +1088,21 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
         </div>
       )}
 
+      {/* عرض المزيد */}
+      {!loading && filtered.length > pageSize && (
+        <div style={{ textAlign: "center", marginTop: 14 }}>
+          <button onClick={() => setPageSize(n => n + 40)}
+            style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", color: "#2563EB", padding: "10px 26px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+            عرض المزيد · فاضل {filtered.length - pageSize}
+          </button>
+        </div>
+      )}
+      {!loading && filtered.length > 0 && (
+        <div style={{ textAlign: "center", marginTop: 10, fontSize: 11, color: "#94A3B8" }}>
+          بتعرض {Math.min(pageSize, filtered.length)} من {filtered.length}
+        </div>
+      )}
+
       {/* TASK DETAIL MODAL */}
       {showDetail && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={e => e.target === e.currentTarget && setShowDetail(null)}>
@@ -1080,6 +1158,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                           attachments: showDetail.attachments || "",
                           due_date: showDetail.due_date?.slice(0,10) || "",
                           priority: showDetail.priority, assigned_to: showDetail.assigned_to,
+                          difficulty: showDetail.difficulty || "medium",
                           helpers: parseHelpers(showDetail.helpers),
                           task_type: showDetail.task_type,
                         });
@@ -1425,6 +1504,21 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                   </select>
                 </div>
               </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>مستوى الصعوبة</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {DIFFICULTY.map(d => {
+                    const on = (editForm.difficulty || "medium") === d.v;
+                    return (
+                      <button key={d.v} type="button" onClick={() => setEditForm(f => ({ ...f, difficulty: d.v }))}
+                        style={{ flex: 1, minWidth: 74, padding: "8px 6px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#EFF6FF" : "#F8FAFC", color: on ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                        {d.l}<div style={{ fontSize: 9, marginTop: 2 }}>×{ptsCfg ? ptsCfg[d.key] : d.def}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <HelperPicker value={editForm.helpers} owner={editForm.assigned_to} onChange={v => setEditForm(f => ({ ...f, helpers: v }))} />
               <div>
                 <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>
@@ -1580,6 +1674,49 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
               {savingRate ? "جاري الحفظ..." : "حفظ ✓"}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ═══ شريط فلاتر الأيام (تعديل ١) ═══ */}
+      {(() => {
+        const counts = {
+          today:    tasks.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === today && !isLate(t)).length,
+          tomorrow: tasks.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === tomorrowStr).length,
+          week:     tasks.filter(t => !isKitchen(t) && t.due_date && String(t.due_date).slice(0,10) >= today && String(t.due_date).slice(0,10) <= weekEndStr).length,
+          late:     tasks.filter(isLate).length,
+          kitchen:  tasks.filter(isKitchen).length,
+          all:      tasks.length,
+        };
+        const BTNS = [
+          ["today",    "النهارده",   "#2563EB", "#EFF6FF", "#BFDBFE"],
+          ["tomorrow", "بكرا",       "#7C3AED", "#F5F3FF", "#DDD6FE"],
+          ["week",     "الأسبوع ده", "#0891B2", "#ECFEFF", "#A5F3FC"],
+          ["late",     "🔴 متأخر",   "#DC2626", "#FEF2F2", "#FECACA"],
+          ["kitchen",  "🍳 المطبخ",  "#D97706", "#FFFBEB", "#FDE68A"],
+          ["all",      "الكل",       "#64748B", "#F1F5F9", "#E2E8F0"],
+        ];
+        return (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
+            {BTNS.map(([v, l, c, bg, br]) => {
+              const on = dayView === v;
+              return (
+                <button key={v} onClick={() => { setDayView(v); setPageSize(40); }}
+                  style={{ padding: "7px 13px", borderRadius: 20, border: `2px solid ${on ? c : "#E2E8F0"}`, background: on ? bg : "#FFFFFF", color: on ? c : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                  {l}
+                  <span style={{ fontSize: 10, marginRight: 5, opacity: 0.75 }}>{counts[v]}</span>
+                </button>
+              );
+            })}
+            <input type="date" value={pickedDay}
+              onChange={e => { setPickedDay(e.target.value); setDayView(e.target.value ? "pick" : "today"); setPageSize(40); }}
+              style={{ background: dayView === "pick" ? "#EFF6FF" : "#F8FAFC", border: `2px solid ${dayView === "pick" ? "#2563EB" : "#E2E8F0"}`, color: "#0F172A", padding: "6px 10px", borderRadius: 20, fontSize: 12, outline: "none" }} />
+          </div>
+        );
+      })()}
+
+      {dayView === "kitchen" && (
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "9px 14px", marginBottom: 12, fontSize: 12, color: "#D97706", lineHeight: 1.8 }}>
+          🍳 <b>المطبخ:</b> تاسكات ليها مسؤول ولسه مالهاش تاريخ تسليم · <b>مستبعدة من النقاط ومؤشر الضغط</b> · أول ما تحطي تاريخ بتخرج لـ To Do لوحدها
         </div>
       )}
 
