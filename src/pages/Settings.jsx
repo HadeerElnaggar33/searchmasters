@@ -14,6 +14,7 @@ const TABS = [
   ["content",   "💬 الرسائل والمحتوى"],
   ["stickers",  "🖼 الاستيكرات"],
   ["team",      "👥 الفريق والصلاحيات"],
+  ["types",     "🏷 أنواع التاسكات"],
   ["recurring", "🔄 التاسكات المتكررة"],
   ["features",  "🎛 تفعيل الميزات"],
   ["log",       "📜 سجل التغييرات"],
@@ -113,6 +114,9 @@ export default function Settings({ user }) {
   const [moodQs, setMoodQs] = useState([]);
   const [medals, setMedals] = useState([]);
   const [stickers, setStickers] = useState([]);
+  const [types, setTypes] = useState([]);
+  const [newType, setNewType] = useState({ name: "", group_name: "Content" });
+  const [editType, setEditType] = useState(null);
   const [stForm, setStForm] = useState({ name: "", category: "مود", places: ["mood"], situation: "none", rate: "normal", start_date: "", end_date: "" });
   const [stFile, setStFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -141,7 +145,7 @@ export default function Settings({ user }) {
 
   async function load() {
     setLoading(true);
-    const [c, st, m, r, mm, ds, mq, bd, sk, lg] = await Promise.all([
+    const [c, st, m, r, mm, ds, mq, bd, sk, tt, lg] = await Promise.all([
       loadWorkConfig(),
       sb("app_settings?select=key,value"),
       sb("team_members?order=name"),
@@ -151,6 +155,7 @@ export default function Settings({ user }) {
       sb("mood_questions?order=sort_order"),
       sb("badges?order=category"),
       sb("stickers?order=created_at.desc"),
+      sb("task_types?order=sort_order"),
       sb("settings_log?order=changed_at.desc&limit=60"),
     ]);
     if (c) { setCfg(c); setDays(c.workingDays); }
@@ -162,6 +167,7 @@ export default function Settings({ user }) {
     if (mq) setMoodQs(mq);
     if (bd) setMedals(bd);
     if (sk) setStickers(sk);
+    if (tt) setTypes(tt);
     if (lg) setLog(lg);
     setLoading(false);
   }
@@ -347,6 +353,29 @@ export default function Settings({ user }) {
   async function delSticker(x) {
     await sb(`stickers?id=eq.${x.id}`, "DELETE");
     await writeLog("حذف استيكر", x.name, "");
+    await load();
+  }
+
+  async function addType() {
+    if (!newType.name.trim()) { alert("اكتبي اسم النوع"); return; }
+    if (types.some(t => t.name === newType.name.trim())) { alert("النوع ده موجود خلاص"); return; }
+    const maxOrder = types.reduce((a, t) => Math.max(a, Number(t.sort_order) || 0), 0);
+    await sb("task_types", "POST", { name: newType.name.trim(), group_name: newType.group_name, sort_order: maxOrder + 1 });
+    await writeLog("إضافة نوع تاسك", "", newType.name.trim());
+    setNewType({ name: "", group_name: newType.group_name });
+    flash("✅ اتضاف");
+    await load();
+  }
+
+  async function saveTypeEdit() {
+    if (!editType.name.trim()) return;
+    await sb(`task_types?id=eq.${editType.id}`, "PATCH", { name: editType.name.trim(), group_name: editType.group_name });
+    await writeLog("تعديل نوع تاسك", "", editType.name.trim());
+    setEditType(null); flash("✅ اتحفظ"); await load();
+  }
+
+  async function toggleType(t) {
+    await sb(`task_types?id=eq.${t.id}`, "PATCH", { is_active: t.is_active === false });
     await load();
   }
 
@@ -785,6 +814,51 @@ export default function Settings({ user }) {
         </div>
       )}
 
+      {tab === "types" && (
+        <>
+          <div style={card}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>🏷 إضافة نوع</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 12 }}>
+              الاسم بالإنجليزي · الصيغة: المجموعة ثم شرطة عادية بمسافة قبلها وبعدها ثم التفصيل
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "2fr 1fr auto", gap: 8 }}>
+              <input value={newType.name} onChange={e => setNewType(f => ({ ...f, name: e.target.value }))}
+                placeholder="Content - Localization" style={inp} />
+              <input value={newType.group_name} onChange={e => setNewType(f => ({ ...f, group_name: e.target.value }))}
+                placeholder="المجموعة" style={inp} list="tt-groups" />
+              <datalist id="tt-groups">
+                {[...new Set(types.map(t => t.group_name))].map(g => <option key={g} value={g} />)}
+              </datalist>
+              <button onClick={addType} style={{ background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: "9px 18px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>+ إضافة</button>
+            </div>
+          </div>
+
+          {[...new Set(types.map(t => t.group_name))].map(g => (
+            <div key={g} style={card}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 10 }}>
+                {g} ({types.filter(t => t.group_name === g).length})
+              </div>
+              {types.filter(t => t.group_name === g).map(t => (
+                <div key={t.id} style={{ background: t.is_active === false ? "#FEF2F2" : "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 12px", marginBottom: 5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ flex: 1, minWidth: 130, fontSize: 13, color: "#0F172A", fontWeight: 600 }}>{t.name}</span>
+                  <button onClick={() => setEditType({ ...t })} style={{ background: "none", color: "#2563EB", fontSize: 12 }}>✏️</button>
+                  <button onClick={() => toggleType(t)}
+                    style={{ background: t.is_active === false ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${t.is_active === false ? "#FECACA" : "#A7F3D0"}`, color: t.is_active === false ? "#DC2626" : "#059669", padding: "3px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700 }}>
+                    {t.is_active === false ? "موقوف" : "مفعّل"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {types.length === 0 && (
+            <div style={{ ...card, textAlign: "center", color: "#94A3B8", fontSize: 13, padding: 26 }}>
+              مفيش أنواع لسه — شغّلي ملف task_types_setup.sql في Supabase
+            </div>
+          )}
+        </>
+      )}
+
       {tab === "recurring" && (
         <div style={card}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>🔄 التاسكات المتكررة ({recurring.length})</div>
@@ -851,6 +925,27 @@ export default function Settings({ user }) {
               </div>
             ))
           }
+        </div>
+      )}
+
+      {/* ═══ تعديل نوع تاسك ═══ */}
+      {editType && (
+        <div onClick={e => e.target === e.currentTarget && setEditType(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 400 }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>✏️ تعديل النوع</h3>
+            <div style={{ fontSize: 11, color: "#D97706", marginBottom: 12, lineHeight: 1.7 }}>
+              ⚠️ تغيير الاسم مش هيغيّر التاسكات القديمة المسجّلة بالاسم القديم
+            </div>
+            <div style={label}>الاسم</div>
+            <input value={editType.name} onChange={e => setEditType(f => ({ ...f, name: e.target.value }))} style={{ ...inp, marginBottom: 10 }} />
+            <div style={label}>المجموعة</div>
+            <input value={editType.group_name} onChange={e => setEditType(f => ({ ...f, group_name: e.target.value }))} style={{ ...inp, marginBottom: 14 }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveTypeEdit} style={{ flex: 1, background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>حفظ ✓</button>
+              <button onClick={() => setEditType(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
         </div>
       )}
 
