@@ -41,10 +41,6 @@ function parseHelpers(val) {
   return String(val).split(",").map(x => x.trim()).filter(Boolean);
 }
 
-function isOnTask(task, name) {
-  return task.assigned_to === name || parseHelpers(task.helpers).includes(name);
-}
-
 function getFileIcon(url) {
   if (!url) return "🔗";
   if (url.includes("sheets")) return "📊";
@@ -382,6 +378,19 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
   }
 
+  // ═══ الرجوع بالتاسك لحالة «لم تبدأ» ═══
+  async function revertToTodo(task) {
+    // لو التايمر شغال عليها، نوقفه الأول عشان الوقت ما يضيعش
+    if (timer && String(timer.task_id) === String(task.id)) {
+      await stopTimer(user.name);
+      setTimer(null);
+    }
+    await sb(`tasks?id=eq.${task.id}`, "PATCH", { status: "todo", started_at: null });
+    await addHistory(task.id, "reverted", user.name, "رجعت لحالة «لم تبدأ»");
+    await loadAll();
+    setShowDetail(null);
+  }
+
   // ═══ حساب وصرف نقاط التاسك بالمعادلة ═══
   async function awardTaskPoints(task) {
     const cfg = ptsCfg || await loadPointsConfig();
@@ -587,9 +596,10 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
 
   const filtered = tasks.filter(t => {
     // الموظف يشوف تاسكاته بس · واللي عنده صلاحية إدارة التاسكات يشوف الفريق كله
-    if (!canAssign && !isOnTask(t, user.name)) return false;
+    // التاسك بتظهر للمسؤول الأساسي بس · المساعد بيتشاف اسمه عليها لكن مش في قائمته
+    if (!canAssign && t.assigned_to !== user.name) return false;
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
-    if (filterAssignee !== "all" && !isOnTask(t, filterAssignee)) return false;
+    if (filterAssignee !== "all" && t.assigned_to !== filterAssignee) return false;
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterOverdue && !(t.due_date && String(t.due_date).slice(0,10) < today && t.status !== "completed" && t.status !== "cancelled")) return false;
     if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.assigned_to?.includes(search) && !parseHelpers(t.helpers).some(h => h.includes(search))) return false;
@@ -865,7 +875,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
               const proj = projects.find(x => x.id === showDetail.project_id);
               const isOverdue = showDetail.due_date && showDetail.due_date.slice(0,10) < today && showDetail.status !== "completed";
               const detailHelpers = parseHelpers(showDetail.helpers);
-              const canEdit = isAdmin || isOnTask(showDetail, user.name);
+              const canEdit = isAdmin || showDetail.assigned_to === user.name;
               return (
                 <>
                   <h2 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 800, color: "#0F172A", paddingLeft: 30, lineHeight: 1.4 }}>{showDetail.title}</h2>
@@ -916,6 +926,12 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                       }} style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>✏️ تعديل</button>
 
                       {showDetail.status === "todo" && <button onClick={() => updateStatus(showDetail, "in_progress")} style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>⚡ ابدأ العمل</button>}
+                      {(showDetail.status === "in_progress" || showDetail.status === "pending_review") && (
+                        <button onClick={() => revertToTodo(showDetail)}
+                          style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                          ↩️ رجّعها «لم تبدأ»
+                        </button>
+                      )}
                       {showDetail.status === "in_progress" && <button onClick={() => updateStatus(showDetail, "pending_review")} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>👁 إرسال للمراجعة</button>}
                       {(showDetail.status === "in_progress" || showDetail.status === "pending_review" || showDetail.status === "needs_revision") && <button onClick={() => updateStatus(showDetail, "completed")} style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>✅ مكتمل</button>}
                       {isAdmin && showDetail.status === "pending_review" && <button onClick={() => updateStatus(showDetail, "needs_revision")} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>🔁 محتاج تعديل</button>}
@@ -1009,7 +1025,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                   )}
 
                   {/* التايمر */}
-                  {(showDetail.assigned_to === user.name || parseHelpers(showDetail.helpers).includes(user.name)) && showDetail.status !== "completed" && (
+                  {showDetail.assigned_to === user.name && showDetail.status !== "completed" && (
                     <div style={{ marginBottom: 14 }}>
                       <button onClick={() => toggleTimer(showDetail)}
                         style={{ width: "100%", background: (timer && String(timer.task_id) === String(showDetail.id)) ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${(timer && String(timer.task_id) === String(showDetail.id)) ? "#FECACA" : "#A7F3D0"}`, color: (timer && String(timer.task_id) === String(showDetail.id)) ? "#DC2626" : "#059669", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>
