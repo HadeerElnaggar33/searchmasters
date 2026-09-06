@@ -22,33 +22,52 @@ import Mood from "./pages/Mood.jsx";
 import Badges from "./pages/Badges.jsx";
 import Draws, { DrawPopup } from "./pages/Draws.jsx";
 import Live from "./pages/Live.jsx";
+import TabHub from "./pages/TabHub.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
 import { heartbeat, activeTimer, stopTimer, fmtClock } from "./timer.js";
 
-const NAV = [
-  { id: "dashboard",  icon: "🏠", label: "الرئيسية",    mobileShow: true },
-  { id: "tasks",      icon: "📋", label: "التاسكات",    mobileShow: true },
-  { id: "projects",   icon: "📁", label: "المشاريع",    mobileShow: true },
-  { id: "calendar",   icon: "📅", label: "التقويم",     mobileShow: true },
-  { id: "reports",    icon: "📊", label: "التقارير",    mobileShow: true },
-  { id: "workload",   icon: "⚖️", label: "توزيع العمل", mobileShow: false, adminOnly: true },
-  { id: "live",       icon: "👁", label: "متابعة الفريق", mobileShow: false, adminOnly: true },
-  { id: "templates",  icon: "⚡", label: "القوالب",     mobileShow: false, adminOnly: true },
-  { id: "team",       icon: "👥", label: "الفريق",      mobileShow: false, adminOnly: true },
-  { id: "eom",        icon: "🏆", label: "موظف الشهر",  mobileShow: false },
-  { id: "feedback",   icon: "💬", label: "الملاحظات",   mobileShow: false },
-  { id: "settings",   icon: "🎛", label: "الكنترول",    mobileShow: false, adminOnly: true },
-  { id: "attendance", icon: "⏰", label: "الحضور",      mobileShow: false },
-  { id: "leaves",     icon: "🏖", label: "الإجازات",    mobileShow: false },
-  { id: "hours",      icon: "⏱", label: "الساعات",     mobileShow: false },
-  { id: "score",      icon: "⭐", label: "النقاط",      mobileShow: false },
-  { id: "mood",       icon: "☀️", label: "صباحك",       mobileShow: false },
-  { id: "badges",     icon: "🏅", label: "الشارات",     mobileShow: false },
-  { id: "draws",      icon: "🎁", label: "الجوائز",     mobileShow: false },
-  { id: "notifications", icon: "🔔", label: "الإشعارات", mobileShow: false },
-  { id: "seo",        icon: "🔍", label: "SEO Audit",   mobileShow: false },
+const ITEMS = {
+  dashboard:     { icon: "🏠", label: "الرئيسية" },
+  mood:          { icon: "☀️", label: "مودك النهارده" },
+  notifications: { icon: "🔔", label: "الإشعارات" },
+  tasks:         { icon: "📋", label: "التاسكات" },
+  attendance:    { icon: "⏰", label: "الحضور والساعات" },
+  attendanceMe:  { icon: "⏰", label: "حضوري وساعاتي", page: "attendance" },
+  attendanceTeam:{ icon: "🗓", label: "حضور وساعات الفريق", page: "attendance" },
+  projects:      { icon: "📁", label: "المشاريع" },
+  team:          { icon: "👥", label: "الفريق" },
+  training:      { icon: "🎓", label: "نتعلم سوا", soon: true },
+  leaves:        { icon: "🏖", label: "الإجازات" },
+  feedback:      { icon: "💬", label: "الملاحظات" },
+  reports:       { icon: "📊", label: "التقارير" },
+  seo:           { icon: "🔍", label: "SEO Audit" },
+  score:         { icon: "⭐", label: "رصيدي" },
+  eom:           { icon: "🏆", label: "موظف الشهر" },
+  draws:         { icon: "🎁", label: "جوائز عشوائية" },
+  settings:      { icon: "🎛", label: "الكنترول" },
+};
+
+// أقسام المدير
+const NAV_ADMIN = [
+  { title: "يومك",           items: ["mood", "notifications", "tasks", "attendanceMe"] },
+  { title: "ورشة الشغل",     items: ["projects", "team", "training"] },
+  { title: "دفتر الفريق",    items: ["attendanceTeam", "leaves", "feedback"] },
+  { title: "حصاد الشهر",     items: ["reports", "seo"] },
+  { title: "شنطة الجوايز",   items: ["score", "eom", "draws"] },
+  { title: "غرفة العمليات",  items: ["settings"] },
 ];
+
+// أقسام العضو
+const NAV_MEMBER = [
+  { title: "يومك",         items: ["mood", "notifications", "tasks"] },
+  { title: "بتاعي أنا",    items: ["attendance", "leaves", "feedback"] },
+  { title: "شنطة الجوايز", items: ["score", "eom", "draws"] },
+  { title: "شغلي",         items: ["projects", "training"] },
+  { title: "حصاد الشهر",   items: ["reports", "seo"] },
+];
+
+const MOBILE_NAV = ["dashboard", "tasks", "projects", "score", "notifications"];
 
 function useIsMobile() {
   const [v, setV] = useState(() => /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768);
@@ -75,6 +94,10 @@ export default function App() {
   const [voiceTrigger, setVoiceTrigger] = useState(0);
   const [taskFilter, setTaskFilter] = useState(null);
   const [openTaskId, setOpenTaskId] = useState(null);
+  const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem("sm_nav_collapsed") === "1"; } catch (e) { return false; } });
+  const [closedSections, setClosedSections] = useState(() => { try { return JSON.parse(localStorage.getItem("sm_nav_sections") || "[]"); } catch (e) { return []; } });
+  const [pinned, setPinned] = useState(() => { try { return JSON.parse(localStorage.getItem("sm_nav_pinned") || "[]"); } catch (e) { return []; } });
+  const [counts, setCounts] = useState({});
   const [timer, setTimer] = useState(null);
   // مؤقت العمل (الحضور) — تعديل ٣
   const [work, setWork] = useState({ record: null, open: null, doneMins: 0 });
@@ -272,11 +295,22 @@ export default function App() {
 
   const PAGES = {
     dashboard:  <Dashboard  user={user} onNavigate={(p, f) => { if (f) setTaskFilter({ ...f, _k: Date.now() }); setPage(p); }} />,
-    tasks:      <Tasks      user={user} voiceTrigger={voiceTrigger} incomingFilter={taskFilter} openTaskId={openTaskId} />,
+    tasks: <TabHub id="tasks" user={user} tabs={[
+      { v: "list",     l: "📋 قائمة",  render: () => <Tasks user={user} voiceTrigger={voiceTrigger} incomingFilter={taskFilter} openTaskId={openTaskId} /> },
+      { v: "calendar", l: "🗓 تقويم",  render: () => <Calendar user={user} /> },
+      { v: "templates",l: "⚡ قوالب",  render: () => <Templates user={user} /> },
+    ]} />,
     projects:   <Projects   user={user} />,
-    team:       <Team       user={user} />,
+    team: <TabHub id="team" user={user} title="👥 الفريق" tabs={[
+      { v: "members",  l: "👥 الأعضاء",       render: () => <Team user={user} /> },
+      { v: "workload", l: "⚖️ توزيع العمل",   render: () => <Workload user={user} /> },
+      { v: "live",     l: "👁 متابعة مباشرة", render: () => <Live user={user} /> },
+    ]} />,
     reports:    <Reports    user={user} />,
-    attendance: <Attendance user={user} />,
+    attendance: <TabHub id="att" user={user} title={isAdmin ? "⏰ حضوري وساعاتي" : "⏰ الحضور والساعات"} tabs={[
+      { v: "att",   l: "⏰ الحضور",  render: () => <Attendance user={user} /> },
+      { v: "hours", l: "⏱ الساعات", render: () => <Hours user={user} /> },
+    ]} />,
     calendar:   <Calendar   user={user} />,
     templates:  <Templates  user={user} />,
     workload:   <Workload   user={user} />,
@@ -286,7 +320,10 @@ export default function App() {
     settings:   <Settings user={user} />,
     leaves:     <Leaves user={user} />,
     hours:      <Hours user={user} />,
-    score:      <Score user={user} />,
+    score: <TabHub id="score" user={user} title="⭐ رصيدي" tabs={[
+      { v: "points", l: "⭐ النقاط",     render: () => <Score user={user} /> },
+      { v: "medals", l: "🏅 ميدالياتي", render: () => <Badges user={user} /> },
+    ]} />,
     mood:       <Mood user={user} onDone={() => setPage("dashboard")} />,
     badges:     <Badges user={user} />,
     draws:      <Draws user={user} />,
@@ -296,7 +333,80 @@ export default function App() {
     }} />,
   };
 
-  const visibleNav = NAV.filter(n => !n.adminOnly || isAdmin);
+  const sections = isAdmin ? NAV_ADMIN : NAV_MEMBER;
+
+  function toggleSection(t) {
+    setClosedSections(prev => {
+      const next = prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t];
+      try { localStorage.setItem("sm_nav_sections", JSON.stringify(next)); } catch (e) { /* */ }
+      return next;
+    });
+  }
+  function togglePin(key) {
+    setPinned(prev => {
+      const next = prev.includes(key) ? prev.filter(x => x !== key) : (prev.length >= 5 ? prev : [...prev, key]);
+      try { localStorage.setItem("sm_nav_pinned", JSON.stringify(next)); } catch (e) { /* */ }
+      return next;
+    });
+  }
+  function toggleCollapse() {
+    setNavCollapsed(v => {
+      try { localStorage.setItem("sm_nav_collapsed", v ? "0" : "1"); } catch (e) { /* */ }
+      return !v;
+    });
+  }
+
+  // ── تعديل ١٠: أرقام على بنود القائمة ──
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    async function loadCounts() {
+      try {
+        const mm = String(new Date().getMonth() + 1).padStart(2, "0");
+        const yy = new Date().getFullYear();
+        const [tk, nt, lg, dw, att, hr, fb, lv] = await Promise.all([
+          sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&select=assigned_to,status,is_parent`),
+          sb(`notifications?recipient=eq.${encodeURIComponent(user.name)}&is_read=eq.false&select=id`),
+          sb(`score_ledger?month=eq.${encodeURIComponent(CURRENT_MONTH)}&member_name=eq.${encodeURIComponent(user.name)}&select=points`),
+          sb(`draws?status=eq.won&winner_name=eq.${encodeURIComponent(user.name)}&select=id`),
+          sb(`attendance?member_name=eq.${encodeURIComponent(user.name)}&date=gte.${yy}-${mm}-01&select=working_minutes,status`),
+          sb(`help_requests?helper=eq.${encodeURIComponent(user.name)}&status=eq.open&select=id`),
+          sb(`feedback_notes?member_name=eq.${encodeURIComponent(user.name)}&acknowledged=eq.false&select=id`),
+          sb("leave_requests?status=eq.pending&select=id"),
+        ]);
+        if (!alive) return;
+        const mine = (tk || []).filter(t => t.assigned_to === user.name && t.status !== "completed" && t.status !== "cancelled" && !t.is_parent);
+        const mins = (att || []).filter(a => a.status !== "leave").reduce((a, x) => a + (Number(x.working_minutes) || 0), 0);
+        setCounts({
+          tasks: mine.length,
+          notifications: (nt || []).length,
+          score: Math.round((lg || []).reduce((a, r) => a + Number(r.points || 0), 0) * 10) / 10,
+          draws: (dw || []).length,
+          attendance: Math.round(mins / 60),
+          help: (hr || []).length,
+          feedback: (fb || []).length,
+          leaves: (lv || []).length,
+        });
+      } catch (e) { /* تجاهل */ }
+    }
+    loadCounts();
+    const t = setInterval(loadCounts, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user, page]);
+
+  // أرقام التنبيه تختفي عند الصفر · أرقام التحفيز بتفضل ظاهرة
+  function badgeOf(key) {
+    const alert = { notifications: counts.notifications, feedback: counts.feedback, leaves: isAdmin ? counts.leaves : 0, tasks: counts.tasks };
+    const always = { score: counts.score, draws: counts.draws, attendance: counts.attendance, attendanceMe: counts.attendance, attendanceTeam: null };
+    if (key in alert) {
+      const v = alert[key];
+      return v > 0 ? { v, alert: true } : null;
+    }
+    if (key in always && always[key] !== null && always[key] !== undefined) {
+      return { v: always[key], alert: false };
+    }
+    return null;
+  }
 
   // Shared styles
   const S = {
@@ -325,23 +435,89 @@ export default function App() {
         </div>
       </div>
 
+      {/* زرار طي القائمة (تعديل ٨) */}
+      <button onClick={toggleCollapse}
+        style={{ background: "#F8FAFC", border: "none", borderBottom: "1px solid #E2E8F0", color: "#94A3B8", padding: "6px", fontSize: 12, width: "100%" }}>
+        {navCollapsed ? "»" : "« طيّ القائمة"}
+      </button>
+
       {/* Nav */}
       <nav style={{ flex: 1, padding: "10px 8px", overflowY: "auto" }}>
-        {visibleNav.map(n => (
-          <button
-            key={n.id}
-            onClick={() => { setPage(n.id); setShowSidebar(false); }}
-            style={S.navBtn(page === n.id)}
-            onMouseEnter={e => { if (page !== n.id) { e.currentTarget.style.background = "#E0F2FE"; e.currentTarget.style.color = "#0284C7"; }}}
-            onMouseLeave={e => { if (page !== n.id) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#64748B"; }}}
-          >
-            <span style={{ fontSize: 17, flexShrink: 0 }}>{n.icon}</span>
-            <span style={{ flex: 1 }}>{n.label}</span>
-            {n.id === "tasks" && notifCount > 0 && (
-              <span style={{ background: "#EF4444", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>{notifCount}</span>
-            )}
-          </button>
-        ))}
+        {(() => {
+          const NavBtn = ({ key2, inPinned }) => {
+            const it = ITEMS[key2];
+            if (!it) return null;
+            const target = it.page || key2;
+            const active = page === target && !it.soon;
+            const b = badgeOf(key2);
+            return (
+              <div key={(inPinned ? "p" : "") + key2} style={{ position: "relative" }}>
+                <button
+                  onClick={() => { if (it.soon) { alert("القسم ده لسه بيتبني"); return; } setPage(target); setShowSidebar(false); }}
+                  title={navCollapsed ? it.label : ""}
+                  style={{ ...S.navBtn(active), opacity: it.soon ? 0.5 : 1, justifyContent: navCollapsed ? "center" : "flex-start" }}
+                  onMouseEnter={e => { if (!active) { e.currentTarget.style.background = "#E0F2FE"; e.currentTarget.style.color = "#0284C7"; }}}
+                  onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#64748B"; }}}>
+                  <span style={{ fontSize: 17, flexShrink: 0 }}>{it.icon}</span>
+                  {!navCollapsed && <span style={{ flex: 1, textAlign: "right" }}>{it.label}{it.soon ? " ⏳" : ""}</span>}
+                  {b && (
+                    <span style={{
+                      background: b.alert ? "#EF4444" : "#EFF6FF",
+                      color: b.alert ? "#fff" : "#2563EB",
+                      border: b.alert ? "none" : "1px solid #BFDBFE",
+                      borderRadius: 10, minWidth: 20, height: 18, padding: "0 5px",
+                      fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}>{b.v > 99 ? "99+" : b.v}</span>
+                  )}
+                </button>
+                {!navCollapsed && !it.soon && (
+                  <button onClick={e => { e.stopPropagation(); togglePin(key2); }}
+                    title={pinned.includes(key2) ? "شيل من المثبت" : "ثبّت في الأعلى"}
+                    style={{ position: "absolute", left: 4, top: "50%", transform: "translateY(-50%)", background: "none", color: pinned.includes(key2) ? "#D97706" : "#E2E8F0", fontSize: 11, padding: 2 }}>
+                    {pinned.includes(key2) ? "📌" : "📍"}
+                  </button>
+                )}
+              </div>
+            );
+          };
+
+          return (
+            <>
+              {/* الرئيسية — ثابتة برّة الأقسام */}
+              <NavBtn key2="dashboard" />
+
+              {/* المثبت */}
+              {pinned.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  {!navCollapsed && (
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#94A3B8", padding: "4px 12px 4px", letterSpacing: 0.4 }}>📌 المثبت</div>
+                  )}
+                  {pinned.map(k => <NavBtn key={"pin" + k} key2={k} inPinned />)}
+                  <div style={{ height: 1, background: "#E2E8F0", margin: "8px 12px" }}></div>
+                </div>
+              )}
+
+              {/* الأقسام */}
+              {sections.map(sec => {
+                const hasActive = sec.items.some(k => (ITEMS[k] && (ITEMS[k].page || k)) === page);
+                const closed = closedSections.includes(sec.title) && !hasActive;
+                return (
+                  <div key={sec.title} style={{ marginTop: 8 }}>
+                    {!navCollapsed && (
+                      <button onClick={() => toggleSection(sec.title)}
+                        style={{ width: "100%", background: "none", border: "none", padding: "5px 12px", display: "flex", alignItems: "center", gap: 6, color: "#94A3B8", fontSize: 10, fontWeight: 800, letterSpacing: 0.4 }}>
+                        <span style={{ flex: 1, textAlign: "right" }}>{sec.title}</span>
+                        <span style={{ fontSize: 9 }}>{closed ? "▸" : "▾"}</span>
+                      </button>
+                    )}
+                    {navCollapsed && <div style={{ height: 1, background: "#E2E8F0", margin: "6px 10px" }}></div>}
+                    {!closed && sec.items.map(k => <NavBtn key={k} key2={k} />)}
+                  </div>
+                );
+              })}
+            </>
+          );
+        })()}
       </nav>
 
       {/* User */}
@@ -559,7 +735,7 @@ onClick={() => setPage("notifications")}
       {/* Mobile Bottom Nav */}
       {isMobile && (
         <nav style={{ background: "#FFFFFF", borderTop: "1px solid #E2E8F0", display: "flex", padding: "4px 0 max(4px,env(safe-area-inset-bottom))", position: "sticky", bottom: 0, zIndex: 90, flexShrink: 0, boxShadow: "0 -2px 8px rgba(15,23,42,0.06)" }}>
-          {NAV.filter(n => n.mobileShow && (!n.adminOnly || isAdmin)).map(n => (
+          {MOBILE_NAV.map(k => ITEMS[k] && { id: k, ...ITEMS[k] }).filter(Boolean).map(n => (
             <button key={n.id} onClick={() => setPage(n.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 1, padding: "5px 2px", background: "none", color: page === n.id ? "#2563EB" : "#94A3B8", fontSize: 10, fontWeight: page === n.id ? 700 : 400, position: "relative" }}>
               <span style={{ fontSize: 19 }}>{n.icon}</span>
               <span style={{ fontSize: 8 }}>{n.label}</span>
