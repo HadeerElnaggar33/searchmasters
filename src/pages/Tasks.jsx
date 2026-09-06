@@ -335,6 +335,11 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   async function updateStatus(task, newStatus) {
     const updates = { status: newStatus };
     if (newStatus === "in_progress" && !task.started_at) updates.started_at = new Date().toISOString();
+    // إعادة فتح تاسك مكتملة: نمسح وقت الإكمال ونسجّل مرة الفتح
+    if (task.status === "completed" && newStatus !== "completed") {
+      updates.completed_at = null;
+      updates.reopen_count = Number(task.reopen_count || 0) + 1;
+    }
     if (task.status === "help_needed" && newStatus !== "help_needed") {
       await sb(`tasks?id=eq.${task.id}`, "PATCH", { help_manual_override: true, status_before_help: null });
     }
@@ -468,6 +473,9 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
 
   // ═══ الرجوع بالتاسك لحالة «لم تبدأ» ═══
   async function revertToTodo(task) {
+    if (task.status === "completed") {
+      await sb(`tasks?id=eq.${task.id}`, "PATCH", { completed_at: null, reopen_count: Number(task.reopen_count || 0) + 1 });
+    }
     // لو التايمر شغال عليها، نوقفه الأول عشان الوقت ما يضيعش
     if (timer && String(timer.task_id) === String(task.id)) {
       await stopTimer(user.name);
@@ -659,7 +667,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
       priority: parsed.priority || "medium",
       task_date: d,
       due_date: d,
-      notes: parsed.raw,
+      notes: "",
       month: monthOfDate,
     });
     setVoiceOpen(false);
@@ -1014,6 +1022,18 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                       }} style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>✏️ تعديل</button>
 
                       {showDetail.status === "todo" && <button onClick={() => updateStatus(showDetail, "in_progress")} style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>⚡ ابدأ العمل</button>}
+                      {showDetail.status === "completed" && (
+                        <>
+                          <button onClick={() => updateStatus(showDetail, "in_progress")}
+                            style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                            ↩️ افتحها تاني
+                          </button>
+                          <button onClick={() => revertToTodo(showDetail)}
+                            style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                            ↩️ رجّعها «لم تبدأ»
+                          </button>
+                        </>
+                      )}
                       {(showDetail.status === "in_progress" || showDetail.status === "pending_review") && (
                         <button onClick={() => revertToTodo(showDetail)}
                           style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
@@ -1075,6 +1095,34 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                           {x.note && <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{x.note}</div>}
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* ═══ سجل تغيّر الحالات (بند ١٠) ═══ */}
+                  {history.filter(h => ["status_changed", "reverted", "created", "help_requested", "help_done"].includes(h.action)).length > 0 && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", marginBottom: 6 }}>
+                        🕐 سجل الحالات
+                        {Number(showDetail.reopen_count) > 0 && (
+                          <span style={{ fontSize: 10, background: "#FFFBEB", color: "#D97706", border: "1px solid #FDE68A", padding: "1px 8px", borderRadius: 20, marginRight: 6, fontWeight: 700 }}>
+                            اتفتحت تاني {showDetail.reopen_count} مرة
+                          </span>
+                        )}
+                      </div>
+                      {history
+                        .filter(h => ["status_changed", "reverted", "created", "help_requested", "help_done"].includes(h.action))
+                        .map(h => (
+                          <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "6px 10px", marginBottom: 4, fontSize: 11 }}>
+                            <span style={{ color: "#94A3B8", minWidth: 96 }}>
+                              {new Date(h.created_at).toLocaleString("ar-EG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                            <span style={{ flex: 1, color: "#0F172A" }}>{h.details || h.action}</span>
+                            <span style={{ color: "#64748B" }}>{h.performed_by}</span>
+                          </div>
+                        ))}
+                      <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4, lineHeight: 1.6 }}>
+                        الإنجاز بيتحسب <b>مرة واحدة للتاسك</b> مهما اتفتحت وقفلت · السجل ده للمراجعة بس
+                      </div>
                     </div>
                   )}
 
@@ -1511,8 +1559,14 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                   </div>
                 </div>
 
+                {(parsed.warnings || []).map((w, i) => (
+                  <div key={i} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "#D97706", marginBottom: 8, lineHeight: 1.7 }}>
+                    ⚠️ {w}
+                  </div>
+                ))}
+
                 <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.6 }}>
-                  💡 مش هيتحفظ دلوقتي — هتتفتحلك نافذة التاسك متملية وإنتي تراجعي وتعدّلي وتحفظي.
+                  💡 مش هيتحفظ دلوقتي — هتتفتحلك نافذة التاسك متملية وإنتي تراجعي وتعدّلي وتحفظي · الملاحظات هتفضل فاضية
                 </div>
 
                 <div style={{ display: "flex", gap: 10 }}>
