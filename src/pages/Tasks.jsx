@@ -106,6 +106,11 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   const [blockForm, setBlockForm] = useState({ reason: "", waiting_on: "", blocked_by: "" });
   const [savingBlock, setSavingBlock] = useState(false);
   const [contentStatuses, setContentStatuses] = useState([]);
+  const [reviewOpen, setReviewOpen] = useState(null);      // نافذة الإرسال للمراجعة
+  const [reviewPick, setReviewPick] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [savingReview, setSavingReview] = useState(false);
+  const [decideNote, setDecideNote] = useState("");
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -152,6 +157,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     setStickers(await loadStickers());
     const hr = await sb("help_requests?order=created_at.desc");
     if (hr) setHelpReqs(hr);
+    const rv = await sb("task_reviews?order=created_at.desc");
+    if (rv) setReviews(rv);
   }
 
   // ── الميداليات المقترحة حسب سياق التاسك (تعديل ٢٦) ──
@@ -358,6 +365,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     if (task.status === "completed" && newStatus !== "completed") {
       updates.completed_at = null;
       updates.reopen_count = Number(task.reopen_count || 0) + 1;
+      await clearTaskPoints(task);   // النقاط الأساسية والبونص بتتمسح
     }
     if (task.status === "help_needed" && newStatus !== "help_needed") {
       await sb(`tasks?id=eq.${task.id}`, "PATCH", { help_manual_override: true, status_before_help: null });
@@ -412,6 +420,135 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     await addHistory(task.id, "deliverable_added", user.name, deliverUrl || deliverNote);
     setShowDeliver(null); setDeliverUrl(""); setDeliverNote(""); await loadAll();
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
+  }
+
+  // ═══ دورة المراجعة (تعديل ٤) ═══
+  function parseReviewers(v) {
+    if (!v) return [];
+    if (Array.isArray(v)) return v.filter(Boolean);
+    return String(v).split(",").map(x => x.trim()).filter(Boolean);
+  }
+
+  // نقاط أساسية بس: الأساس × الأولوية × الصعوبة — من غير أي إضافات
+  function basePointsOf(task, cfg) {
+    const c = cfg || ptsCfg || {};
+    const base = Number(c.pts_base) || 5;
+    const pm = Number(c[`pts_prio_${task.priority || "medium"}`]) || 1;
+    const dk = { easy: "pts_diff_easy", medium: "pts_diff_medium", hard: "pts_diff_hard", very_hard: "pts_diff_very_hard" }[task.difficulty || "medium"];
+    const dm = Number(c[dk]) || 1;
+    return Math.round(base * pm * dm * 10) / 10;
+  }
+
+  async function sendToReview(task) {
+    if (reviewPick.length === 0) { alert("لازم تحددي مراجع واحد على الأقل"); return; }
+    setSavingReview(true);
+    const round = Number(task.review_round || 0) + 1;
+
+    await sb(`task_reviews?task_id=eq.${task.id}&decision=is.null`, "DELETE");
+    for (const r of reviewPick) {
+      await sb("task_reviews", "POST", { task_id: String(task.id), task_title: task.title, reviewer: r, round });
+    }
+
+    const updates = {
+      status: "pending_review",
+      reviewers: reviewPick.join(", "),
+      review_round: round,
+      sent_review_at: new Date().toISOString(),
+    };
+    await sb(`tasks?id=eq.${task.id}`, "PATCH", updates);
+
+    // النقاط الأساسية بتتحسب لحظة الإرسال — مرة واحدة بس
+    const pts = basePointsOf(task);
+    await replaceTaskScore({
+      member: task.assigned_to, month: task.month || monthLabelOf(),
+      source: "task_base", points: pts,
+      reason: `نقاط أساسية — «${task.title}»`, taskId: task.id, by: user.name,
+    });
+
+    await addHistory(task.id, "sent_review", user.name, `اتبعتت لـ${reviewPick.join("، ")} · جولة ${round}`);
+    for (const r of reviewPick) {
+      await addNotification(r, `👁 ${task.assigned_to} بعت «${task.title}» لمراجعتك`, "review", task.id);
+    }
+
+    setSavingReview(false);
+    setReviewOpen(null);
+    setReviewPick([]);
+    patchTask(task.id, updates);
+    if (task.assigned_to === user.name) {
+      setBreakdown({ title: task.title, total: pts, lines: [{ label: "نقاط أساسية على الإرسال للمراجعة", value: pts }] });
+    }
+    setShowDetail(null);
+  }
+
+  async function decideReview(task, approve) {
+    const round = Number(task.review_round || 1);
+    const mine = reviews.find(r => String(r.task_id) === String(task.id) && r.reviewer === user.name && r.round === round && !r.decision);
+    if (!mine) { alert("مش مطلوب منك مراجعة التاسك دي"); return; }
+    setSavingReview(true);
+
+    await sb(`task_reviews?id=eq.${mine.id}`, "PATCH", {
+      decision: approve ? "approved" : "rejected",
+      note: decideNote.trim() || null,
+      decided_at: new Date().toISOString(),
+    });
+
+    if (!approve) {
+      // أول رفض بيرجّعها فوراً من غير انتظار باقي المراجعين ومن غير أي خصم
+      const updates = { status: "in_progress", was_rejected: true };
+      await sb(`tasks?id=eq.${task.id}`, "PATCH", updates);
+      await addHistory(task.id, "review_rejected", user.name, `رفض المراجعة${decideNote.trim() ? ": " + decideNote.trim() : ""}`);
+      await addNotification(task.assigned_to, `🔁 ${user.name} رجّع «${task.title}» للتعديل${decideNote.trim() ? " — " + decideNote.trim() : ""}`, "review", task.id);
+      patchTask(task.id, updates);
+      setSavingReview(false); setDecideNote(""); setShowDetail(null);
+      await loadAll();
+      return;
+    }
+
+    // اعتماد: التاسك متتقفلش غير لما كل المراجعين يعتمدوا
+    const all = await sb(`task_reviews?task_id=eq.${task.id}&round=eq.${round}`);
+    const pending = (all || []).filter(r => !r.decision && r.reviewer !== user.name);
+    await addHistory(task.id, "review_approved", user.name, `اعتمد المراجعة${decideNote.trim() ? ": " + decideNote.trim() : ""}`);
+
+    if (pending.length > 0) {
+      await addNotification(task.assigned_to, `✅ ${user.name} اعتمد «${task.title}» · فاضل ${pending.length} مراجع`, "review", task.id);
+      setSavingReview(false); setDecideNote("");
+      await loadAll();
+      return;
+    }
+
+    // كل المراجعين اعتمدوا
+    const firstTry = !task.was_rejected;
+    const bonus = firstTry
+      ? Number((ptsCfg && ptsCfg.pts_review_bonus_first) ?? 2)
+      : Number((ptsCfg && ptsCfg.pts_review_bonus_retry) ?? 1);
+
+    const updates = { status: "completed", completed_at: new Date().toISOString() };
+    await sb(`tasks?id=eq.${task.id}`, "PATCH", updates);
+
+    if (task.due_date) {
+      await replaceTaskScore({
+        member: task.assigned_to, month: task.month || monthLabelOf(),
+        source: "task_bonus", points: bonus,
+        reason: firstTry ? `بونص اعتماد من أول محاولة — «${task.title}»` : `بونص اعتماد بعد تعديل — «${task.title}»`,
+        taskId: task.id, by: user.name,
+      });
+    }
+
+    if (timer && String(timer.task_id) === String(task.id)) { await stopTimer(user.name); setTimer(null); }
+    await addHistory(task.id, "completed", user.name, "كل المراجعين اعتمدوا");
+    await addNotification(task.assigned_to, `🎉 «${task.title}» اتعمدت بالكامل · +${bonus} بونص`, "done", task.id);
+
+    setSavingReview(false); setDecideNote("");
+    patchTask(task.id, updates);
+    setShowDetail(null);
+    await loadAll();
+  }
+
+  // الرجوع من Completed بيمسح النقاط الأساسية والبونص
+  async function clearTaskPoints(task) {
+    await sb(`score_ledger?task_id=eq.${encodeURIComponent(String(task.id))}&source=eq.task_base`, "DELETE");
+    await sb(`score_ledger?task_id=eq.${encodeURIComponent(String(task.id))}&source=eq.task_bonus`, "DELETE");
+    await sb(`score_ledger?task_id=eq.${encodeURIComponent(String(task.id))}&source=eq.task_complete`, "DELETE");
   }
 
   // ═══ التوقف والتبعية (بند ٦ + ٨) ═══
@@ -1184,9 +1321,14 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                           ↩️ رجّعها «لم تبدأ»
                         </button>
                       )}
-                      {showDetail.status === "in_progress" && <button onClick={() => updateStatus(showDetail, "pending_review")} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>👁 إرسال للمراجعة</button>}
-                      {(showDetail.status === "in_progress" || showDetail.status === "pending_review" || showDetail.status === "needs_revision") && <button onClick={() => updateStatus(showDetail, "completed")} style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>✅ مكتمل</button>}
-                      {isAdmin && showDetail.status === "pending_review" && <button onClick={() => updateStatus(showDetail, "needs_revision")} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>🔁 محتاج تعديل</button>}
+                      {(showDetail.status === "in_progress" || showDetail.status === "needs_revision") && showDetail.assigned_to === user.name && (
+                        <button onClick={() => { setReviewPick(parseReviewers(showDetail.reviewers)); setReviewOpen(showDetail); }}
+                          style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                          👁 إرسال للمراجعة
+                        </button>
+                      )}
+
+
                       <button onClick={() => setShowShift(showDetail)} style={{ background: "#FFF7ED", border: "1px solid #FED7AA", color: "#D97706", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>⏩ تأجيل لغد</button>
                       <button onClick={() => setShowDeliver(showDetail)} style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#7C3AED", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>📎 Deliverable</button>
                     </div>
@@ -1269,6 +1411,48 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                       </div>
                     </div>
                   )}
+
+                  {/* ═══ لوحة المراجعة (تعديل ٤) ═══ */}
+                  {showDetail.status === "pending_review" && (() => {
+                    const round = Number(showDetail.review_round || 1);
+                    const rows = reviews.filter(r => String(r.task_id) === String(showDetail.id) && r.round === round);
+                    const mine = rows.find(r => r.reviewer === user.name && !r.decision);
+                    return (
+                      <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#D97706", marginBottom: 8 }}>
+                          👁 تحت المراجعة · جولة {round}
+                        </div>
+                        {rows.map(r => (
+                          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 8, padding: "6px 10px", marginBottom: 4 }}>
+                            <span style={{ fontSize: 13 }}>{r.decision === "approved" ? "✅" : r.decision === "rejected" ? "🔁" : "⏳"}</span>
+                            <span style={{ flex: 1, fontSize: 12, color: "#0F172A" }}>{r.reviewer}</span>
+                            <span style={{ fontSize: 11, color: r.decision === "approved" ? "#059669" : r.decision === "rejected" ? "#DC2626" : "#94A3B8" }}>
+                              {r.decision === "approved" ? "اعتمد" : r.decision === "rejected" ? "رجّعها" : "لسه"}
+                            </span>
+                          </div>
+                        ))}
+                        {rows.some(r => r.note) && rows.filter(r => r.note).map(r => (
+                          <div key={"n" + r.id} style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>💬 {r.reviewer}: {r.note}</div>
+                        ))}
+
+                        {mine && (
+                          <div style={{ marginTop: 10 }}>
+                            <textarea value={decideNote} onChange={e => setDecideNote(e.target.value)} rows={2}
+                              placeholder="ملاحظة للمراجعة (اختيارية)" style={{ ...inp, resize: "vertical", marginBottom: 8, background: "#FFFFFF" }} />
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button onClick={() => decideReview(showDetail, true)} disabled={savingReview}
+                                style={{ flex: 1, background: "#059669", color: "#fff", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>✅ اعتماد</button>
+                              <button onClick={() => decideReview(showDetail, false)} disabled={savingReview}
+                                style={{ flex: 1, background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>🔁 رجّعها للتعديل</button>
+                            </div>
+                          </div>
+                        )}
+                        {!mine && showDetail.assigned_to === user.name && (
+                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>مستنيين قرار المراجعين</div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* ═══ حالة المحتوى (بند ٧) ═══ */}
                   {contentStatuses.length > 0 && canEdit && (
@@ -1677,6 +1861,28 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
         </div>
       )}
 
+      {/* ═══ تاسكات محتاجة مراجعتي (تعديل ٤) ═══ */}
+      {(() => {
+        const mine = reviews.filter(r => r.reviewer === user.name && !r.decision);
+        const list = mine.map(r => tasks.find(t => String(t.id) === String(r.task_id) && t.status === "pending_review")).filter(Boolean);
+        if (list.length === 0) return null;
+        return (
+          <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 16, padding: 16, marginBottom: 14 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#D97706", marginBottom: 10 }}>
+              👁 تاسكات محتاجة مراجعتي ({list.length})
+            </div>
+            {list.map(t => (
+              <button key={t.id} onClick={() => openDetail(t)}
+                style={{ width: "100%", textAlign: "right", background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 12px", marginBottom: 5, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+                <span style={{ fontSize: 11, color: "#94A3B8" }}>{t.assigned_to}</span>
+                <span style={{ fontSize: 12, color: "#D97706", fontWeight: 700 }}>راجعها ←</span>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* ═══ شريط فلاتر الأيام (تعديل ١) ═══ */}
       {(() => {
         const counts = {
@@ -1840,6 +2046,49 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ اختيار المراجعين ═══ */}
+      {reviewOpen && (
+        <div onClick={e => e.target === e.currentTarget && setReviewOpen(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 330, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 430, maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ textAlign: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 34, marginBottom: 6 }}>👁</div>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#0F172A" }}>إرسال للمراجعة</h3>
+              <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 4 }}>{reviewOpen.title}</div>
+            </div>
+
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 6, fontWeight: 600 }}>
+              مين يراجعها؟ * <span style={{ color: "#94A3B8", fontWeight: 400 }}>— واحد أو أكتر</span>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+              {members.filter(m => m.name !== reviewOpen.assigned_to).map(m => {
+                const on = reviewPick.includes(m.name);
+                return (
+                  <button key={m.id} onClick={() => setReviewPick(v => on ? v.filter(x => x !== m.name) : [...v, m.name])}
+                    style={{ padding: "8px 14px", borderRadius: 20, border: `2px solid ${on ? "#D97706" : "#E2E8F0"}`, background: on ? "#FFFBEB" : "#F8FAFC", color: on ? "#D97706" : "#64748B", fontSize: 13, fontWeight: on ? 700 : 500 }}>
+                    {on ? "✓ " : ""}{m.name}{m.role === "admin" ? " (المدير)" : ""}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "9px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.8 }}>
+              النقاط الأساسية <b>{basePointsOf(reviewOpen)}</b> هتتحسب دلوقتي مرة واحدة<br />
+              التاسك متتقفلش غير لما <b>كل</b> المراجعين يعتمدوا · وأول رفض بيرجّعها لك على طول من غير أي خصم<br />
+              بونص الاعتماد: <b>{(ptsCfg && ptsCfg.pts_review_bonus_first) ?? 2}</b> من أول محاولة · <b>{(ptsCfg && ptsCfg.pts_review_bonus_retry) ?? 1}</b> لو كان قبلها رفض
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => sendToReview(reviewOpen)} disabled={savingReview || reviewPick.length === 0}
+                style={{ flex: 1, background: (savingReview || reviewPick.length === 0) ? "#CBD5E1" : "linear-gradient(135deg,#D97706,#B45309)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                {savingReview ? "..." : "ابعتها للمراجعة 👁"}
+              </button>
+              <button onClick={() => setReviewOpen(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
           </div>
         </div>
       )}
