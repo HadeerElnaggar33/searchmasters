@@ -73,10 +73,35 @@ export async function uploadSticker(file, urlBase, key) {
   try {
     const res = await fetch(`${urlBase}/storage/v1/object/awards/${encodeURIComponent(path)}`, {
       method: "POST",
-      headers: { apikey: key, Authorization: `Bearer ${key}`, "x-upsert": "true" },
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "x-upsert": "true",
+        "Content-Type": file.type || "application/octet-stream",
+      },
       body: file,
     });
-    if (!res.ok) { console.error("Sticker upload:", await res.text()); return null; }
-    return `${urlBase}/storage/v1/object/public/awards/${encodeURIComponent(path)}`;
-  } catch (e) { console.error(e); return null; }
+
+    if (!res.ok) {
+      const raw = await res.text();
+      console.error("Sticker upload failed:", res.status, raw);
+      let why = raw;
+      try { const j = JSON.parse(raw); why = j.message || j.error || raw; } catch (e) { /* نص عادي */ }
+
+      // ترجمة أشهر الأسباب لرسالة مفهومة
+      if (res.status === 400 && /bucket.*not.*found|Bucket not found/i.test(raw)) {
+        why = "مفيش bucket اسمه awards — شغّلي ملف storage_setup.sql في Supabase";
+      } else if (res.status === 403 || /row-level security|Unauthorized|new row violates/i.test(raw)) {
+        why = "الرفع مرفوض — الـ bucket موجود بس مفيش إذن رفع · شغّلي ملف storage_setup.sql";
+      } else if (res.status === 413) {
+        why = "الصورة كبيرة على حد الرفع في Supabase";
+      }
+      return { error: `${why} (كود ${res.status})` };
+    }
+
+    return { url: `${urlBase}/storage/v1/object/public/awards/${encodeURIComponent(path)}` };
+  } catch (e) {
+    console.error(e);
+    return { error: "مشكلة في الاتصال بالسيرفر: " + (e.message || e) };
+  }
 }
