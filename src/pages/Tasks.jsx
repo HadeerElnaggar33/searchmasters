@@ -112,6 +112,9 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   const [reviews, setReviews] = useState([]);
   const [savingReview, setSavingReview] = useState(false);
   const [decideNote, setDecideNote] = useState("");
+  const [subOpen, setSubOpen] = useState(null);
+  const [subRows, setSubRows] = useState([{ title: "", assigned_to: "", priority: "medium", difficulty: "medium", due_date: "" }]);
+  const [savingSub, setSavingSub] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -401,6 +404,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     }
     if (newStatus === "pending_review") await addNotification("هدير", `👁 ${user.name} أرسل للمراجعة: ${task.title}`, "review", task.id);
     patchTask(task.id, updates);
+    if (task.parent_task_id) setTimeout(() => syncParent(task.parent_task_id), 500);
     if (showDetail?.id === task.id) openDetail({ ...task, status: newStatus });
   }
 
@@ -429,6 +433,69 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     await addHistory(task.id, "deliverable_added", user.name, deliverUrl || deliverNote);
     setShowDeliver(null); setDeliverUrl(""); setDeliverNote(""); await loadAll();
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
+  }
+
+  // ═══ المهام الفرعية (بند ١١) ═══
+  const subsOf = id => tasks.filter(t => String(t.parent_task_id || "") === String(id) && !t.is_help_task);
+
+  async function addSubtasks() {
+    if (!subOpen) return;
+    const rows = subRows.filter(r => r.title.trim());
+    if (rows.length === 0) { alert("اكتبي بند واحد على الأقل"); return; }
+    setSavingSub(true);
+    const parent = subOpen;
+
+    // أول مرة: التاسك الأصلية تتحول لأب — غلاف من غير نقاط
+    if (!parent.is_parent) {
+      await sb(`tasks?id=eq.${parent.id}`, "PATCH", { is_parent: true });
+      await clearTaskPoints(parent);
+      await addHistory(parent.id, "became_parent", user.name, "اتحولت لتاسك أب — البنود تحتها");
+    }
+
+    for (const r of rows) {
+      await sb("tasks", "POST", {
+        title: r.title.trim(),
+        project_id: parent.project_id || null,
+        assigned_to: r.assigned_to || parent.assigned_to,
+        task_type: parent.task_type,
+        priority: r.priority || "medium",
+        difficulty: r.difficulty || "medium",
+        status: "todo",
+        month: parent.month || CURRENT_MONTH,
+        task_date: today,
+        due_date: r.due_date || parent.due_date || null,
+        created_by: user.name,
+        parent_task_id: String(parent.id),
+      });
+      if (r.assigned_to && r.assigned_to !== user.name) {
+        await addNotification(r.assigned_to, `📌 بند جديد في «${parent.title}»: ${r.title.trim()}`, "assign");
+      }
+    }
+
+    setSavingSub(false);
+    setSubOpen(null);
+    setSubRows([{ title: "", assigned_to: "", priority: "medium", difficulty: "medium", due_date: "" }]);
+    await loadAll();
+  }
+
+  // الأب بيتحول Completed لوحده لما كل البنود تخلص
+  async function syncParent(parentId) {
+    if (!parentId) return;
+    const subs = subsOf(parentId);
+    if (subs.length === 0) return;
+    const parent = tasks.find(t => String(t.id) === String(parentId));
+    if (!parent) return;
+    const allDone = subs.every(x => x.status === "completed" || x.status === "cancelled");
+    const target = allDone ? "completed" : (parent.status === "completed" ? "in_progress" : parent.status);
+    if (parent.status !== target) {
+      await sb(`tasks?id=eq.${parentId}`, "PATCH", {
+        status: target,
+        completed_at: allDone ? new Date().toISOString() : null,
+      });
+      await addHistory(parentId, "parent_sync", "🤖 تلقائي",
+        allDone ? "كل البنود خلصت — الأب اتقفل" : "بند اتفتح تاني — الأب رجع جاري");
+      patchTask(parentId, { status: target });
+    }
   }
 
   // ═══ دورة المراجعة (تعديل ٤) ═══
@@ -483,6 +550,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     setReviewOpen(null);
     setReviewPick([]);
     patchTask(task.id, updates);
+    if (task.parent_task_id) setTimeout(() => syncParent(task.parent_task_id), 500);
     if (task.assigned_to === user.name) {
       setBreakdown({ title: task.title, total: pts, lines: [{ label: "نقاط أساسية على الإرسال للمراجعة", value: pts }] });
     }
@@ -508,6 +576,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
       await addHistory(task.id, "review_rejected", user.name, `رفض المراجعة${decideNote.trim() ? ": " + decideNote.trim() : ""}`);
       await addNotification(task.assigned_to, `🔁 ${user.name} رجّع «${task.title}» للتعديل${decideNote.trim() ? " — " + decideNote.trim() : ""}`, "review", task.id);
       patchTask(task.id, updates);
+    if (task.parent_task_id) setTimeout(() => syncParent(task.parent_task_id), 500);
       setSavingReview(false); setDecideNote(""); setShowDetail(null);
       await loadAll();
       return;
@@ -549,6 +618,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
 
     setSavingReview(false); setDecideNote("");
     patchTask(task.id, updates);
+    if (task.parent_task_id) setTimeout(() => syncParent(task.parent_task_id), 500);
     setShowDetail(null);
     await loadAll();
   }
@@ -704,6 +774,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
 
   // ═══ حساب وصرف نقاط التاسك بالمعادلة ═══
   async function awardTaskPoints(task) {
+    // التاسك الأب غلاف — مالهاش نقاط
+    if (task.is_parent) return;
     // تاسكات المطبخ (من غير تاريخ تسليم) مستبعدة من النقاط
     if (!task.due_date) {
       if (task.assigned_to === user.name) {
@@ -1100,6 +1172,14 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                           <span style={{ fontSize: 11, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
                           {proj && <span style={{ fontSize: 11, color: "#64748B" }}>📁 {proj.name}</span>}
                           <span style={{ fontSize: 11, color: "#64748B" }}>👤 {task.assigned_to}</span>
+                          {task.is_parent && (() => {
+                            const subs = subsOf(task.id);
+                            const d = subs.filter(x => x.status === "completed").length;
+                            return <span style={{ fontSize: 11, background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>📑 {d}/{subs.length}</span>;
+                          })()}
+                          {task.parent_task_id && !task.is_help_task && (
+                            <span title="بند في تاسك أكبر" style={{ fontSize: 11, color: "#64748B" }}>📑</span>
+                          )}
                           {task.content_status && (
                             <span style={{ fontSize: 11, background: "#ECFEFF", color: "#0891B2", border: "1px solid #A5F3FC", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
                               📄 {task.content_status}
@@ -1418,6 +1498,62 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                       </div>
                     </div>
                   )}
+
+                  {/* ═══ البنود الفرعية (بند ١١) ═══ */}
+                  {(() => {
+                    const subs = subsOf(showDetail.id);
+                    const done = subs.filter(x => x.status === "completed").length;
+                    const pct = subs.length ? Math.round((done / subs.length) * 100) : 0;
+                    if (subs.length === 0 && !canEdit) return null;
+                    return (
+                      <div style={{ marginBottom: 14 }}>
+                        {subs.length > 0 && (
+                          <>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: "#64748B" }}>📑 البنود</span>
+                              <span style={{ fontSize: 12, fontWeight: 800, color: pct === 100 ? "#059669" : "#2563EB" }}>{done} من {subs.length}</span>
+                              <div style={{ flex: 1, minWidth: 80, background: "#F1F5F9", borderRadius: 6, height: 7, overflow: "hidden" }}>
+                                <div style={{ width: pct + "%", height: "100%", background: pct === 100 ? "#059669" : "#2563EB", borderRadius: 6 }}></div>
+                              </div>
+                            </div>
+                            {subs.map(x => {
+                              const st2 = STATUS_CONFIG[x.status] || STATUS_CONFIG.todo;
+                              return (
+                                <button key={x.id} onClick={() => openDetail(x)}
+                                  style={{ width: "100%", textAlign: "right", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 11px", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span>{st2.icon}</span>
+                                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: x.status === "completed" ? "line-through" : "none" }}>{x.title}</span>
+                                  <span style={{ fontSize: 11, color: "#94A3B8" }}>{x.assigned_to}</span>
+                                  <span style={{ fontSize: 11, color: "#2563EB" }}>←</span>
+                                </button>
+                              );
+                            })}
+                            <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4, lineHeight: 1.6 }}>
+                              الأب غلاف بس — النقاط والضغط على البنود · وبيتقفل لوحده لما كلها تخلص
+                            </div>
+                          </>
+                        )}
+                        {canEdit && showDetail.status !== "completed" && !showDetail.parent_task_id && (
+                          <button onClick={() => { setSubRows([{ title: "", assigned_to: showDetail.assigned_to, priority: showDetail.priority || "medium", difficulty: "medium", due_date: "" }]); setSubOpen(showDetail); }}
+                            style={{ width: "100%", background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700, marginTop: subs.length ? 8 : 0 }}>
+                            ＋ {subs.length ? "ضيفي بنود تانية" : "قسّميها بنود (سب تاسكس)"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* الرجوع للتاسك الأب */}
+                  {showDetail.parent_task_id && !showDetail.is_help_task && (() => {
+                    const par = tasks.find(x => String(x.id) === String(showDetail.parent_task_id));
+                    if (!par) return null;
+                    return (
+                      <button onClick={() => openDetail(par)}
+                        style={{ width: "100%", background: "#F8FAFC", border: "1px solid #E2E8F0", color: "#64748B", padding: "8px 14px", borderRadius: 8, fontSize: 12, marginBottom: 14 }}>
+                        📑 بند في «{par.title}» — افتحي الأب ←
+                      </button>
+                    );
+                  })()}
 
                   {/* ═══ لوحة المراجعة (تعديل ٤) ═══ */}
                   {showDetail.status === "pending_review" && (() => {
@@ -2053,6 +2189,62 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ إضافة بنود فرعية ═══ */}
+      {subOpen && (
+        <div onClick={e => e.target === e.currentTarget && setSubOpen(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 330, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 620, maxHeight: "92vh", overflowY: "auto" }}>
+            <h3 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 800, color: "#0F172A" }}>📑 قسّمي التاسك بنود</h3>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 14 }}>{subOpen.title}</div>
+
+            <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "9px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.8 }}>
+              التاسك دي هتبقى <b>غلاف</b> — مالهاش نقاط ولا بتدخل مؤشر الضغط<br />
+              كل بند تاسك كاملة ليها مسؤولها ونقاطها وبتظهر في القائمة لوحدها<br />
+              والأب بيتقفل لوحده لما كل البنود تخلص
+            </div>
+
+            {subRows.map((r, i) => (
+              <div key={i} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 12, padding: 12, marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                  <input value={r.title} onChange={e => { const a = [...subRows]; a[i] = { ...a[i], title: e.target.value }; setSubRows(a); }}
+                    placeholder={`البند ${i + 1}`} style={{ ...inp, flex: 1 }} />
+                  {subRows.length > 1 && (
+                    <button onClick={() => setSubRows(subRows.filter((_, j) => j !== i))}
+                      style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "0 12px", borderRadius: 8, fontSize: 14 }}>✕</button>
+                  )}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 6 }}>
+                  <select value={r.assigned_to} onChange={e => { const a = [...subRows]; a[i] = { ...a[i], assigned_to: e.target.value }; setSubRows(a); }} style={{ ...inp, fontSize: 12, padding: "7px 9px" }}>
+                    <option value="">المسؤول</option>
+                    {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                  </select>
+                  <select value={r.priority} onChange={e => { const a = [...subRows]; a[i] = { ...a[i], priority: e.target.value }; setSubRows(a); }} style={{ ...inp, fontSize: 12, padding: "7px 9px" }}>
+                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+                  </select>
+                  <select value={r.difficulty} onChange={e => { const a = [...subRows]; a[i] = { ...a[i], difficulty: e.target.value }; setSubRows(a); }} style={{ ...inp, fontSize: 12, padding: "7px 9px" }}>
+                    {DIFFICULTY.map(d => <option key={d.v} value={d.v}>{d.l}</option>)}
+                  </select>
+                  <input type="date" value={r.due_date} onChange={e => { const a = [...subRows]; a[i] = { ...a[i], due_date: e.target.value }; setSubRows(a); }} style={{ ...inp, fontSize: 12, padding: "7px 9px" }} />
+                </div>
+              </div>
+            ))}
+
+            <button onClick={() => setSubRows([...subRows, { title: "", assigned_to: subOpen.assigned_to, priority: "medium", difficulty: "medium", due_date: "" }])}
+              style={{ width: "100%", background: "#F1F5F9", border: "1px dashed #CBD5E1", color: "#64748B", padding: "9px", borderRadius: 10, fontSize: 13, marginBottom: 14 }}>
+              ＋ بند تاني
+            </button>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={addSubtasks} disabled={savingSub}
+                style={{ flex: 1, background: savingSub ? "#94A3B8" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                {savingSub ? "..." : `إنشاء ${subRows.filter(r => r.title.trim()).length} بند ✓`}
+              </button>
+              <button onClick={() => setSubOpen(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
           </div>
         </div>
       )}
