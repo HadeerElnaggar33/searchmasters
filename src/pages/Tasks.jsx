@@ -9,7 +9,13 @@ import { loadStickers, pickSticker } from "../stickers.js";
 import { labelList } from "../utils/linkLabel.js";
 import Stars from "../utils/Stars.jsx";
 
-const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
+// الأنواع بتتحمّل من قاعدة البيانات · دي احتياطي لو الجدول لسه مااتعملش
+const FALLBACK_TYPES = [
+  { name: "Content - Keyword Research", group_name: "Content" },
+  { name: "Content - Writing", group_name: "Content" },
+  { name: "SEO - Technical", group_name: "SEO" },
+  { name: "Other", group_name: "Other" },
+];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
 const SHIFT_REASONS = ["Schedule conflict","Resource unavailable","Reprioritized","Client delay","Other"];
 
@@ -107,6 +113,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   const [blockForm, setBlockForm] = useState({ reason: "", waiting_on: "", blocked_by: "" });
   const [savingBlock, setSavingBlock] = useState(false);
   const [contentStatuses, setContentStatuses] = useState([]);
+  const [taskTypes, setTaskTypes] = useState(FALLBACK_TYPES);
   const [reviewOpen, setReviewOpen] = useState(null);      // نافذة الإرسال للمراجعة
   const [reviewPick, setReviewPick] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -135,7 +142,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
 
   const emptyForm = {
     title: "", project_id: "", assigned_to: user.name, helpers: [],
-    task_type: "Keyword Research", status: "todo", priority: "medium",
+    task_type: (taskTypes[0] && taskTypes[0].name) || "Other", status: "todo", priority: "medium",
     month: CURRENT_MONTH, task_date: today, due_date: today, notes: "", attachments: "",
     difficulty: "medium",
   };
@@ -163,6 +170,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     if (hr) setHelpReqs(hr);
     const rv = await sb("task_reviews?order=created_at.desc");
     if (rv) setReviews(rv);
+    const tt = await sb("task_types?is_active=eq.true&order=sort_order");
+    if (tt && tt.length) setTaskTypes(tt);
   }
 
   // ── الميداليات المقترحة حسب سياق التاسك (تعديل ٢٦) ──
@@ -943,7 +952,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
 
   function analyzeVoice() {
     if (!transcript.trim()) { setVoiceErr("مفيش كلام اتسجل"); return; }
-    setParsed(parseTranscript(transcript, { projects, members, taskTypes: TASK_TYPES }));
+    setParsed(parseTranscript(transcript, { projects, members, taskTypes: taskTypes.map(t => t.name) }));
   }
 
   function applyVoice() {
@@ -957,7 +966,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
       title: parsed.title || "",
       project_id: parsed.project_id || "",
       assigned_to: parsed.assigned_to || user.name,
-      task_type: parsed.task_type || "Keyword Research",
+      task_type: parsed.task_type || (taskTypes[0] && taskTypes[0].name) || "Other",
       priority: parsed.priority || "medium",
       task_date: d,
       due_date: d,
@@ -1253,7 +1262,13 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                 <div>
                   <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>نوع التاسك</div>
                   <select value={form.task_type} onChange={e => setForm(f => ({ ...f, task_type: e.target.value }))} style={inp}>
-                    {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    {[...new Set(taskTypes.map(t => t.group_name))].map(g => (
+                      <optgroup key={g} label={g}>
+                        {taskTypes.filter(t => t.group_name === g).map(t => (
+                          <option key={t.name} value={t.name}>{t.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1856,7 +1871,13 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
               <div>
                 <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>نوع التاسك</div>
                 <select value={editForm.task_type} onChange={e => setEditForm(f => ({ ...f, task_type: e.target.value }))} style={inp}>
-                  {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  {[...new Set(taskTypes.map(t => t.group_name))].map(g => (
+                    <optgroup key={g} label={g}>
+                      {taskTypes.filter(t => t.group_name === g).map(t => (
+                        <option key={t.name} value={t.name}>{t.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
               <div>
