@@ -304,7 +304,8 @@ export default async function handler(req, res) {
 
       // ── نقاط الضغط ──
       if (P.feature_pressure !== 0 && !onLeave) {
-        const mine = yTasks.filter(t => t.assigned_to === m.name && t.status !== "cancelled");
+        // المطبخ (تاسكات من غير تاريخ تسليم) مستبعد من مؤشر الضغط
+        const mine = yTasks.filter(t => t.assigned_to === m.name && t.status !== "cancelled" && !!t.due_date);
         const openThen = mine.filter(t => t.status !== "completed" || dayOf(t.completed_at) >= yesterday).length;
         const dueSoon  = mine.filter(t => dayOf(t.due_date) === yesterday || dayOf(t.due_date) === todayStr).length;
         const urgentN  = mine.filter(t => t.priority === "urgent" && t.status !== "completed").length;
