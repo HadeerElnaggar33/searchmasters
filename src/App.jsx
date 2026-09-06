@@ -74,6 +74,7 @@ export default function App() {
   const engineRef = useRef(false);
   const [voiceTrigger, setVoiceTrigger] = useState(0);
   const [taskFilter, setTaskFilter] = useState(null);
+  const [openTaskId, setOpenTaskId] = useState(null);
   const [timer, setTimer] = useState(null);
   // مؤقت العمل (الحضور) — تعديل ٣
   const [work, setWork] = useState({ record: null, open: null, doneMins: 0 });
@@ -271,7 +272,7 @@ export default function App() {
 
   const PAGES = {
     dashboard:  <Dashboard  user={user} onNavigate={(p, f) => { if (f) setTaskFilter({ ...f, _k: Date.now() }); setPage(p); }} />,
-    tasks:      <Tasks      user={user} voiceTrigger={voiceTrigger} incomingFilter={taskFilter} />,
+    tasks:      <Tasks      user={user} voiceTrigger={voiceTrigger} incomingFilter={taskFilter} openTaskId={openTaskId} />,
     projects:   <Projects   user={user} />,
     team:       <Team       user={user} />,
     reports:    <Reports    user={user} />,
@@ -290,7 +291,9 @@ export default function App() {
     badges:     <Badges user={user} />,
     draws:      <Draws user={user} />,
     live:       <Live user={user} />,
-    notifications: <Notifications user={user} />,
+    notifications: <Notifications user={user} onOpenItem={n => {
+      if (n.related_task_id) { setOpenTaskId({ id: n.related_task_id, k: Date.now() }); setTaskFilter({ status: "all", _k: Date.now() }); setPage("tasks"); }
+    }} />,
   };
 
   const visibleNav = NAV.filter(n => !n.adminOnly || isAdmin);
