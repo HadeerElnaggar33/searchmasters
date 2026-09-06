@@ -16,6 +16,11 @@ export const SCORE = {
 
 export const SOURCE_LABEL = {
   task_complete:    "تاسك مكتملة",
+  task_base:        "نقاط التاسك الأساسية",
+  task_bonus:       "بونص اعتماد المراجعة",
+  medal:            "ميدالية",
+  hours:            "نقاط ساعات",
+  pressure:         "نقاط ضغط",
   rating:           "تقييم التاسك",
   feedback_pos:     "فيدباك إيجابي",
   feedback_neg:     "فيدباك سلبي",
@@ -142,6 +147,7 @@ export const DEFAULT_PTS = {
   press_th_high: 5, press_th_very: 10,
   // مستويات الأثر ونقاط الزميل
   impact_small: 10, impact_medium: 15, impact_big: 25,
+  pts_review_bonus_first: 2, pts_review_bonus_retry: 1,
   pts_peer_share: 5,
 };
 
