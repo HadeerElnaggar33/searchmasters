@@ -55,6 +55,7 @@ export const STATUS_CONFIG = {
   pending_review: { label: "Pending Review", color: "#D97706", bg: "#FFFBEB", icon: "👁" },
   completed:      { label: "Completed",      color: "#059669", bg: "#ECFDF5", icon: "✅" },
   needs_revision: { label: "Needs Revision", color: "#DC2626", bg: "#FEF2F2", icon: "🔁" },
+  help_needed:    { label: "طلب نجدة",       color: "#DB2777", bg: "#FDF2F8", icon: "🆘" },
   cancelled:      { label: "Cancelled",      color: "#94A3B8", bg: "#F8FAFC", icon: "❌" },
 };
 
