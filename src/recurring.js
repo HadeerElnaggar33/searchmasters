@@ -40,10 +40,15 @@ export function isDueOn(rule, d, cfg) {
   }
 
   if (rule.frequency === "weekly") {
-    const dow = Number(rule.day_of_week ?? 1);
-    // اليوم المقصود في نفس أسبوع d (الأسبوع بيبدأ الأحد)
-    const nominal = addDays(d, dow - d.getDay());
-    return dateStr(shiftToWorkingDay(nominal, cfg)) === ds;
+    // القالب ممكن يحدد أكتر من يوم في الأسبوع
+    const days = rule.days_of_week
+      ? String(rule.days_of_week).split(",").map(Number).filter(x => !isNaN(x))
+      : [Number(rule.day_of_week ?? 1)];
+    for (const dow of days) {
+      const nominal = addDays(d, dow - d.getDay());
+      if (dateStr(shiftToWorkingDay(nominal, cfg)) === ds) return true;
+    }
+    return false;
   }
 
   if (rule.frequency === "monthly") {
