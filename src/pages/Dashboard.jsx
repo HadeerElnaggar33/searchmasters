@@ -49,6 +49,7 @@ export default function Dashboard({ user, onNavigate }) {
   const [clockedIn, setClockedIn] = useState(null);
   const [tab, setTab] = useState(() => localStorage.getItem("sm_home_tab") || "mine");
   const [leaves, setLeaves] = useState([]);
+  const [helpOpenReqs, setHelpOpenReqs] = useState([]);
   const [busy, setBusy] = useState(false);
 
   // قسم صباحك
@@ -72,7 +73,7 @@ export default function Dashboard({ user, onNavigate }) {
     const yy = new Date().getFullYear();
     const lastD = new Date(yy, new Date().getMonth() + 1, 0).getDate();
 
-    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv, sk] = await Promise.all([
+    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv, sk, hr] = await Promise.all([
       sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&order=created_at.desc`),
       sb("team_members?is_active=eq.true&order=name"),
       sb(`attendance?date=eq.${today}&order=created_at`),
@@ -91,6 +92,7 @@ export default function Dashboard({ user, onNavigate }) {
       sb(`draws?status=eq.won&winner_name=eq.${encodeURIComponent(user.name)}&select=id,gift_name,won_at`),
       sb("leave_requests?status=eq.pending&order=created_at"),
       loadStickers(),
+      sb("help_requests?status=eq.open&order=created_at.desc"),
     ]);
 
     if (t) setTasks(t);
@@ -111,6 +113,7 @@ export default function Dashboard({ user, onNavigate }) {
     if (gf) setGifts(gf);
     if (lv) setLeaves(lv);
     if (sk) setStickers(sk);
+    if (hr) setHelpOpenReqs(hr);
     setLoading(false);
   }
 
@@ -427,6 +430,7 @@ export default function Dashboard({ user, onNavigate }) {
               <StatCard label="متأخرة"   value={tOverdue.length} color="#D97706" bg="#FDE68A" filter={{ overdue: true }} />
               <StatCard label="جارية"    value={tProg.length}    color="#2563EB" bg="#BFDBFE" filter={{ status: "in_progress" }} />
               <StatCard label="للمراجعة" value={tReview.length}  color="#7C3AED" bg="#DDD6FE" filter={{ status: "pending_review" }} />
+              <StatCard label="طلب نجدة" value={teamLive.filter(t => t.status === "help_needed").length} color="#DB2777" bg="#FBCFE8" filter={{ status: "help_needed" }} />
               <StatCard label="مكتملة"   value={tDone.length}    color="#059669" bg="#A7F3D0" filter={{ status: "completed" }} />
               <StatCard label="الكل"     value={teamLive.length} color="#0F172A" bg="#E2E8F0" filter={{}} />
             </div>
@@ -477,6 +481,22 @@ export default function Dashboard({ user, onNavigate }) {
                     </div>
                     <button onClick={() => decideTask(t, true)} disabled={busy} style={{ background: "#059669", color: "#fff", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>اعتماد</button>
                     <button onClick={() => decideTask(t, false)} disabled={busy} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>للتعديل</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* طلبات الحقوني الجارية */}
+            {helpOpenReqs.length > 0 && (
+              <div style={{ ...C.card, marginBottom: 16, borderRight: "3px solid #DB2777" }}>
+                <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>🆘 طلبات نجدة جارية ({helpOpenReqs.length})</div>
+                {helpOpenReqs.map(r => (
+                  <div key={r.id} style={{ background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 10, padding: "9px 12px", marginBottom: 5 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
+                      {r.requester} ← {r.helper}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{r.task_title}{r.project_name ? ` · ${r.project_name}` : ""}</div>
+                    <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>{r.reason}</div>
                   </div>
                 ))}
               </div>
@@ -618,6 +638,7 @@ export default function Dashboard({ user, onNavigate }) {
         <StatCard label="متأخرة"  value={overdue.length}    color="#D97706" bg="#FDE68A" filter={{ overdue: true }} />
         <StatCard label="جارية"   value={inProgress.length} color="#2563EB" bg="#BFDBFE" filter={{ status: "in_progress" }} />
         <StatCard label="للمراجعة" value={review.length}    color="#7C3AED" bg="#DDD6FE" filter={{ status: "pending_review" }} />
+        <StatCard label="طلب نجدة" value={live.filter(t => t.status === "help_needed").length} color="#DB2777" bg="#FBCFE8" filter={{ status: "help_needed" }} />
         <StatCard label="مكتملة"  value={completed.length}  color="#059669" bg="#A7F3D0" filter={{ status: "completed" }} />
         <StatCard label="الكل"    value={live.length}       color="#0F172A" bg="#E2E8F0" filter={{}} />
       </div>
