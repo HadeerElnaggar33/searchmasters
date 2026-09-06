@@ -39,12 +39,15 @@ export default function Templates({ user }) {
   const [cfg, setCfg] = useState({ workingDays: [0,1,2,3,4], holidays: [] });
   const [running, setRunning] = useState(false);
   const [showAddTemplate, setShowAddTemplate] = useState(false);
+  const [editTemplate, setEditTemplate] = useState(null);
+  const [recurOpen, setRecurOpen] = useState(null);
+  const [recurForm, setRecurForm] = useState({ assignee: "", project_id: "" });
   const [showAddRecurring, setShowAddRecurring] = useState(false);
   const [showApply, setShowApply] = useState(null);
   const [applyForm, setApplyForm] = useState({ project_id: "", assigned_to: "", month: CURRENT_MONTH, due_date: "" });
   const isAdmin = user.role === "admin" || user.role === "team_leader";
 
-  const [tForm, setTForm] = useState({ name: "", description: "", tasks: [{ title: "", task_type: "Keyword Research", priority: "medium" }] });
+  const [tForm, setTForm] = useState({ name: "", description: "", tasks: [{ title: "", task_type: "Keyword Research", priority: "medium" }], frequency: "none", days_of_week: [], day_of_month: 1 });
   const [rForm, setRForm] = useState({ title: "", project_id: "", assigned_to: "", task_type: "GSC Analysis", priority: "medium", frequency: "weekly", day_of_week: 1, day_of_month: 1 });
 
   useEffect(() => { loadAll(); }, []);
@@ -66,10 +69,58 @@ export default function Templates({ user }) {
 
   async function saveTemplate() {
     if (!tForm.name.trim()) return;
-    await sb("task_templates", "POST", { name: tForm.name, description: tForm.description, tasks: tForm.tasks, created_by: user.name });
+    const payload = {
+      name: tForm.name, description: tForm.description, tasks: tForm.tasks,
+      frequency: tForm.frequency || "none",
+      days_of_week: (tForm.days_of_week || []).join(",") || null,
+      day_of_month: tForm.day_of_month || null,
+    };
+    if (editTemplate) {
+      await sb(`task_templates?id=eq.${editTemplate.id}`, "PATCH", payload);
+    } else {
+      await sb("task_templates", "POST", { ...payload, created_by: user.name });
+    }
     await loadAll();
     setShowAddTemplate(false);
-    setTForm({ name: "", description: "", tasks: [{ title: "", task_type: "Keyword Research", priority: "medium" }] });
+    setEditTemplate(null);
+    setTForm({ name: "", description: "", tasks: [{ title: "", task_type: "Keyword Research", priority: "medium" }], frequency: "none", days_of_week: [], day_of_month: 1 });
+  }
+
+  function openEditTemplate(t) {
+    setEditTemplate(t);
+    setTForm({
+      name: t.name || "", description: t.description || "",
+      tasks: (t.tasks && t.tasks.length ? t.tasks : [{ title: "", task_type: "Keyword Research", priority: "medium" }]),
+      frequency: t.frequency || "none",
+      days_of_week: t.days_of_week ? String(t.days_of_week).split(",").map(Number).filter(x => !isNaN(x)) : [],
+      day_of_month: t.day_of_month || 1,
+    });
+    setShowAddTemplate(true);
+  }
+
+  // تفعيل تكرار القالب — المسؤول بيتحدد وقت التفعيل مش مربوط بالقالب
+  async function activateRecurrence(t, assignee, projectId) {
+    if (!t.frequency || t.frequency === "none") { alert("القالب ده مفيهوش تكرار — عدّليه وحددي المعدل"); return; }
+    if (!assignee) { alert("اختاري المسؤول عن التكرار ده"); return; }
+    const list = t.tasks || [];
+    for (const item of list) {
+      await sb("recurring_tasks", "POST", {
+        title: item.title,
+        task_type: item.task_type,
+        priority: item.priority || "medium",
+        project_id: projectId || null,
+        assigned_to: assignee,
+        frequency: t.frequency === "daily" ? "daily" : t.frequency,
+        day_of_week: (t.days_of_week ? String(t.days_of_week).split(",")[0] : 1),
+        days_of_week: t.days_of_week || null,
+        day_of_month: t.day_of_month || 1,
+        template_id: String(t.id),
+        is_active: true,
+        created_by: user.name,
+      });
+    }
+    alert(`✅ اتفعّل تكرار «${t.name}» لـ${assignee} — ${list.length} تاسك هتتولد كل مرة`);
+    await loadAll();
   }
 
   async function applyTemplate(template) {
@@ -191,9 +242,20 @@ export default function Templates({ user }) {
                     <div>
                       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>📝 {t.name}</div>
                       {t.description && <div style={{ fontSize: 12, color: "#9CA3AF" }}>{t.description} · {(t.tasks || []).length} تاسكات</div>}
+                      {t.frequency && t.frequency !== "none" && (
+                        <div style={{ fontSize: 11, color: "#FCD34D", marginTop: 3 }}>
+                          🔄 {t.frequency === "daily" ? "يومي" : t.frequency === "weekly" ? "أسبوعي" : "شهري"}
+                          {t.frequency === "weekly" && t.days_of_week
+                            ? " · " + String(t.days_of_week).split(",").map(d => ["الأحد","الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][Number(d)]).filter(Boolean).join("، ")
+                            : ""}
+                          {t.frequency === "monthly" && t.day_of_month ? ` · يوم ${t.day_of_month}` : ""}
+                        </div>
+                      )}
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
                       {isAdmin && <button onClick={() => { setShowApply(t); setApplyForm({ project_id: "", assigned_to: "", month: CURRENT_MONTH, due_date: "" }); }} style={{ background: "rgba(99,102,241,0.2)", color: "#A5B4FC", padding: "6px 12px", borderRadius: 8, fontSize: 12 }}>تطبيق</button>}
+                      {isAdmin && <button onClick={() => { setRecurForm({ assignee: "", project_id: "" }); setRecurOpen(t); }} style={{ background: "rgba(217,119,6,0.18)", color: "#FCD34D", padding: "6px 12px", borderRadius: 8, fontSize: 12 }}>🔄 تكرار</button>}
+                      {isAdmin && <button onClick={() => openEditTemplate(t)} style={{ background: "rgba(255,255,255,0.06)", color: "#A5B4FC", padding: "6px 10px", borderRadius: 8, fontSize: 12 }}>✏️</button>}
                       {isAdmin && <button onClick={() => deleteTemplate(t.id)} style={{ background: "rgba(239,68,68,0.1)", color: "#FCA5A5", padding: "6px 10px", borderRadius: 8, fontSize: 12 }}>🗑</button>}
                     </div>
                   </div>
@@ -310,11 +372,49 @@ export default function Templates({ user }) {
       )}
 
       {/* Add Template Modal */}
+      {/* ═══ تفعيل تكرار القالب ═══ */}
+      {recurOpen && (
+        <div onClick={e => e.target === e.currentTarget && setRecurOpen(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#111827", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 20, padding: 24, width: "100%", maxWidth: 420 }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 17, fontWeight: 800 }}>🔄 تفعيل تكرار «{recurOpen.name}»</h3>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>
+              {(recurOpen.tasks || []).length} تاسك هتتولد كل مرة
+              {recurOpen.frequency && recurOpen.frequency !== "none"
+                ? ` · ${recurOpen.frequency === "daily" ? "يومي" : recurOpen.frequency === "weekly" ? "أسبوعي" : "شهري"}`
+                : " · ⚠️ القالب مفيهوش تكرار"}
+            </div>
+
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 5 }}>المسؤول عن التكرار ده *</div>
+            <select value={recurForm.assignee} onChange={e => setRecurForm(f => ({ ...f, assignee: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
+              <option value="">— اختاري —</option>
+              {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+            </select>
+
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 5 }}>المشروع</div>
+            <select value={recurForm.project_id} onChange={e => setRecurForm(f => ({ ...f, project_id: e.target.value }))} style={{ ...inp, marginBottom: 14 }}>
+              <option value="">— بدون —</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+
+            <div style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#A5B4FC", marginBottom: 14, lineHeight: 1.7 }}>
+              تقدري تفعّلي نفس القالب أكتر من مرة لأشخاص أو مشاريع مختلفة
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { activateRecurrence(recurOpen, recurForm.assignee, recurForm.project_id); setRecurOpen(null); }}
+                style={{ flex: 1, background: "linear-gradient(135deg,#D97706,#B45309)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>فعّلي التكرار</button>
+              <button onClick={() => setRecurOpen(null)} style={{ background: "rgba(255,255,255,0.06)", color: "#9CA3AF", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAddTemplate && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={e => e.target === e.currentTarget && setShowAddTemplate(false)}>
           <div dir="rtl" style={{ background: "#1A1060", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, padding: 24, width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", position: "relative" }}>
             <button onClick={() => setShowAddTemplate(false)} style={{ position: "absolute", top: 14, left: 14, background: "none", color: "#6B7280", fontSize: 20 }}>✕</button>
-            <h3 style={{ margin: "0 0 20px", fontSize: 17, fontWeight: 800 }}>+ قالب جديد</h3>
+            <h3 style={{ margin: "0 0 20px", fontSize: 17, fontWeight: 800 }}>{editTemplate ? "✏️ تعديل القالب" : "+ قالب جديد"}</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <input value={tForm.name} onChange={e => setTForm(f => ({ ...f, name: e.target.value }))} placeholder="اسم القالب" style={inp} />
               <input value={tForm.description} onChange={e => setTForm(f => ({ ...f, description: e.target.value }))} placeholder="وصف القالب" style={inp} />
@@ -329,7 +429,51 @@ export default function Templates({ user }) {
                 </div>
               ))}
               <button onClick={() => setTForm(f => ({ ...f, tasks: [...f.tasks, { title: "", task_type: "Keyword Research", priority: "medium" }] }))} style={{ background: "rgba(99,102,241,0.1)", color: "#A5B4FC", padding: "8px", borderRadius: 10, fontSize: 13 }}>+ إضافة تاسك</button>
-              <button onClick={saveTemplate} style={{ background: "linear-gradient(135deg,#6366F1,#8B5CF6)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>حفظ القالب</button>
+              {/* ═══ التكرار داخل القالب (بند ١٢) ═══ */}
+              <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8 }}>🔄 التكرار</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: -6 }}>
+                المسؤول عن كل تكرار بيتحدد وقت التفعيل — مش مربوط بالقالب نفسه
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[["none", "بدون تكرار"], ["daily", "يومي"], ["weekly", "أسبوعي"], ["monthly", "شهري"]].map(([v, l]) => {
+                  const on = (tForm.frequency || "none") === v;
+                  return (
+                    <button key={v} onClick={() => setTForm(f => ({ ...f, frequency: v }))}
+                      style={{ flex: 1, minWidth: 80, padding: "9px 6px", borderRadius: 10, border: `2px solid ${on ? "#8B5CF6" : "rgba(255,255,255,0.1)"}`, background: on ? "rgba(139,92,246,0.15)" : "rgba(255,255,255,0.04)", color: on ? "#C4B5FD" : "#9CA3AF", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {tForm.frequency === "weekly" && (
+                <>
+                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>أيام الأسبوع — اختاري يوم أو أكتر</div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"].map((d, i) => {
+                      const on = (tForm.days_of_week || []).includes(i);
+                      return (
+                        <button key={i} onClick={() => setTForm(f => ({ ...f, days_of_week: on ? f.days_of_week.filter(x => x !== i) : [...(f.days_of_week || []), i].sort() }))}
+                          style={{ padding: "7px 12px", borderRadius: 20, border: `2px solid ${on ? "#8B5CF6" : "rgba(255,255,255,0.1)"}`, background: on ? "rgba(139,92,246,0.15)" : "rgba(255,255,255,0.04)", color: on ? "#C4B5FD" : "#9CA3AF", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                          {on ? "✓ " : ""}{d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {tForm.frequency === "monthly" && (
+                <>
+                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>يوم الشهر</div>
+                  <input type="number" min="1" max="31" value={tForm.day_of_month}
+                    onChange={e => setTForm(f => ({ ...f, day_of_month: Number(e.target.value) }))} style={inp} />
+                </>
+              )}
+
+              <button onClick={saveTemplate} style={{ background: "linear-gradient(135deg,#6366F1,#8B5CF6)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                {editTemplate ? "حفظ التعديل" : "حفظ القالب"}
+              </button>
             </div>
           </div>
         </div>
