@@ -7,6 +7,7 @@ import { activeTimer, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTim
 import { GRADES, IMPACT, medalPoints } from "../badges.js";
 import { loadStickers, pickSticker } from "../stickers.js";
 import { labelList } from "../utils/linkLabel.js";
+import Stars from "../utils/Stars.jsx";
 
 const TASK_TYPES = ["Keyword Research","Content Brief","Article Writing","Meta Updates","Technical SEO","GSC Analysis","GA4 Analysis","Backlink Analysis","Competitor Analysis","Monthly Report","Other"];
 const DELAY_REASONS = ["Waiting for client","Waiting for team member","Task took longer","Higher priority task","Technical issue","Other"];
@@ -53,7 +54,7 @@ function getFileIcon(url) {
   return "🔗";
 }
 
-export default function Tasks({ user, voiceTrigger, incomingFilter }) {
+export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [members, setMembers] = useState([]);
@@ -251,6 +252,14 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     }
     await loadAll();
   }
+
+  // فتح تاسك جاية من إشعار (تعديل ٧)
+  useEffect(() => {
+    if (!openTaskId || !openTaskId.id || tasks.length === 0) return;
+    const t = tasks.find(x => String(x.id) === String(openTaskId.id));
+    if (t) { setDayView("all"); openDetail(t); }
+    else alert("التاسك دي مش في الشهر المعروض — غيّري الشهر من فوق");
+  }, [openTaskId && openTaskId.k, tasks.length]);
 
   // فلتر جاي من كروت الصفحة الرئيسية
   useEffect(() => {
@@ -1103,9 +1112,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                             <span style={{ fontSize: 11, color: "#64748B" }}>⏱ {fmtDur(task.total_minutes)}</span>
                           )}
                           {task.rating && (
-                            <span style={{ fontSize: 11, background: SCORE.rating[task.rating] > 0 ? "#ECFDF5" : "#FEF2F2", color: SCORE.rating[task.rating] > 0 ? "#059669" : "#DC2626", border: `1px solid ${SCORE.rating[task.rating] > 0 ? "#A7F3D0" : "#FECACA"}`, padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
-                              ★ {task.rating}
-                            </span>
+                            <Stars value={task.rating} size={13} />
                           )}
                           {task.feedback_positive && <span style={{ fontSize: 11 }} title="فيدباك إيجابي">💙</span>}
                           {task.feedback_negative && <span style={{ fontSize: 11 }} title="محتاج تحسين">📌</span>}
@@ -1342,7 +1349,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                       {showDetail.rating && (
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                           <span style={{ fontSize: 12, color: "#64748B", fontWeight: 600 }}>تقييم الإدارة:</span>
-                          <span style={{ fontSize: 16, letterSpacing: 2 }}>{"★".repeat(showDetail.rating)}<span style={{ color: "#E2E8F0" }}>{"★".repeat(5 - showDetail.rating)}</span></span>
+                          <Stars value={showDetail.rating} size={18} showNumber />
                           <span style={{ fontSize: 12, fontWeight: 800, color: SCORE.rating[showDetail.rating] > 0 ? "#059669" : "#DC2626" }}>
                             {SCORE.rating[showDetail.rating] > 0 ? "+" : ""}{SCORE.rating[showDetail.rating]} نقطة
                           </span>
@@ -1829,7 +1836,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                 return (
                   <button key={n} type="button" onClick={() => setRateForm(f => ({ ...f, rating: String(n) }))}
                     style={{ padding: "8px 10px", borderRadius: 10, border: `2px solid ${on ? (good ? "#059669" : "#DC2626") : "#E2E8F0"}`, background: on ? (good ? "#ECFDF5" : "#FEF2F2") : "#F8FAFC", color: on ? (good ? "#059669" : "#DC2626") : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500, minWidth: 56 }}>
-                    <div style={{ fontSize: 13 }}>{"★".repeat(n)}</div>
+                    <div><Stars value={n} size={12} /></div>
                     <div style={{ fontSize: 10, marginTop: 2 }}>{pts > 0 ? `+${pts}` : pts}</div>
                   </button>
                 );
