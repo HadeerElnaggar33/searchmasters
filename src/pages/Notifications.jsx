@@ -9,7 +9,8 @@ const TYPE_CONFIG = {
   info:   { icon: "🔔", color: "#64748B", bg: "#F8FAFC", label: "إشعار" },
 };
 
-export default function Notifications({ user }) {
+export default function Notifications({ user, onOpenItem }) {
+  const markRead = async n => { if (!n.is_read) await sb(`notifications?id=eq.${n.id}`, "PATCH", { is_read: true }); };
   const [notifs, setNotifs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
@@ -96,7 +97,9 @@ export default function Notifications({ user }) {
                 {items.map(n => {
                   const t = TYPE_CONFIG[n.type] || TYPE_CONFIG.info;
                   return (
-                    <div key={n.id} style={{ background: n.is_read ? "#FFFFFF" : "#EFF6FF", border: `1px solid ${n.is_read ? "#E2E8F0" : "#BFDBFE"}`, borderRadius: 14, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start", boxShadow: "0 1px 3px rgba(15,23,42,0.06)", borderRight: `4px solid ${t.color}` }}>
+                    <div key={n.id}
+                      onClick={() => { if (n.related_task_id && onOpenItem) { markRead(n); onOpenItem(n); } }}
+                      style={{ background: n.is_read ? "#FFFFFF" : "#EFF6FF", border: `1px solid ${n.is_read ? "#E2E8F0" : "#BFDBFE"}`, borderRadius: 14, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start", boxShadow: "0 1px 3px rgba(15,23,42,0.06)", borderRight: `4px solid ${t.color}`, cursor: n.related_task_id ? "pointer" : "default" }}>
                       {/* Icon */}
                       <div style={{ width: 36, height: 36, borderRadius: "50%", background: t.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0, border: `1px solid ${t.color}22` }}>
                         {t.icon}
@@ -109,11 +112,12 @@ export default function Notifications({ user }) {
                           <span style={{ fontSize: 11, background: t.bg, color: t.color, padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{t.label}</span>
                           <span style={{ fontSize: 11, color: "#94A3B8" }}>{timeAgo(n.created_at)}</span>
                           {!n.is_read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2563EB", display: "inline-block" }}></span>}
+                          {n.related_task_id && <span style={{ fontSize: 11, color: "#2563EB", fontWeight: 600 }}>افتحها ←</span>}
                         </div>
                       </div>
 
                       {/* Delete */}
-                      <button onClick={() => deleteNotif(n.id)} style={{ background: "none", color: "#CBD5E1", fontSize: 16, padding: "0 4px", flexShrink: 0, lineHeight: 1 }}>✕</button>
+                      <button onClick={e => { e.stopPropagation(); deleteNotif(n.id); }} style={{ background: "none", color: "#CBD5E1", fontSize: 16, padding: "0 4px", flexShrink: 0, lineHeight: 1 }}>✕</button>
                     </div>
                   );
                 })}
