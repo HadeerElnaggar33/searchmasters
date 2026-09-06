@@ -98,6 +98,10 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   const [helpForm, setHelpForm] = useState({ helper: "", reason: "" });
   const [helpReqs, setHelpReqs] = useState([]);
   const [savingHelp, setSavingHelp] = useState(false);
+  const [blockOpen, setBlockOpen] = useState(null);
+  const [blockForm, setBlockForm] = useState({ reason: "", waiting_on: "", blocked_by: "" });
+  const [savingBlock, setSavingBlock] = useState(false);
+  const [contentStatuses, setContentStatuses] = useState([]);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -261,6 +265,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     if (rows) {
       const g = (k, d) => { const r = rows.find(x => x.key === k); return r ? Number(r.value) : d; };
       setWorkHours({ start: g("work_hour_start", 10), end: g("work_hour_end", 18) });
+      const cs = rows.find(x => x.key === "content_statuses");
+      setContentStatuses(cs && cs.value ? String(cs.value).split(",").map(x => x.trim()).filter(Boolean) : []);
     }
   }
 
@@ -393,6 +399,57 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     await addHistory(task.id, "deliverable_added", user.name, deliverUrl || deliverNote);
     setShowDeliver(null); setDeliverUrl(""); setDeliverNote(""); await loadAll();
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
+  }
+
+  // ═══ التوقف والتبعية (بند ٦ + ٨) ═══
+  async function saveBlock() {
+    if (!blockOpen) return;
+    if (!blockForm.reason.trim()) { alert("اكتبي سبب التوقف"); return; }
+    setSavingBlock(true);
+    const dep = tasks.find(x => String(x.id) === String(blockForm.blocked_by));
+    const t = blockOpen;
+
+    await sb(`tasks?id=eq.${t.id}`, "PATCH", {
+      status_before_help: t.status === "help_needed" ? t.status_before_help : t.status,
+      status: "help_needed",
+      blocked_reason: blockForm.reason.trim(),
+      waiting_on: blockForm.waiting_on || null,
+      blocked_by_task_id: dep ? String(dep.id) : null,
+      blocked_by_title: dep ? dep.title : null,
+      help_manual_override: false,
+    });
+
+    await addHistory(t.id, "blocked", user.name,
+      `توقفت: ${blockForm.reason.trim()}${blockForm.waiting_on ? ` — منتظرين ${blockForm.waiting_on}` : ""}`);
+
+    if (blockForm.waiting_on && blockForm.waiting_on !== user.name) {
+      await addNotification(blockForm.waiting_on, `⏸ ${user.name} متوقف في «${t.title}» ومنتظر إجراء منك`, "info", t.id);
+    }
+
+    setSavingBlock(false);
+    setBlockOpen(null);
+    setBlockForm({ reason: "", waiting_on: "", blocked_by: "" });
+    await loadAll();
+    setShowDetail(null);
+  }
+
+  async function clearBlock(t) {
+    await sb(`tasks?id=eq.${t.id}`, "PATCH", {
+      status: t.status_before_help || "in_progress",
+      status_before_help: null,
+      blocked_reason: null, waiting_on: null,
+      blocked_by_task_id: null, blocked_by_title: null,
+    });
+    await addHistory(t.id, "unblocked", user.name, "التوقف اتحل — رجعت لحالتها");
+    await loadAll();
+    setShowDetail(null);
+  }
+
+  async function setContentStatus(t, v) {
+    await sb(`tasks?id=eq.${t.id}`, "PATCH", { content_status: v || null });
+    await addHistory(t.id, "content_status", user.name, `حالة المحتوى: ${v || "بدون"}`);
+    await loadAll();
+    if (showDetail && showDetail.id === t.id) openDetail({ ...t, content_status: v || null });
   }
 
   // ═══ طلب نجدة «الحقوني» (تعديل ٢٨ + ٣٧) ═══
@@ -834,6 +891,14 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                           <span style={{ fontSize: 11, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
                           {proj && <span style={{ fontSize: 11, color: "#64748B" }}>📁 {proj.name}</span>}
                           <span style={{ fontSize: 11, color: "#64748B" }}>👤 {task.assigned_to}</span>
+                          {task.content_status && (
+                            <span style={{ fontSize: 11, background: "#ECFEFF", color: "#0891B2", border: "1px solid #A5F3FC", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                              📄 {task.content_status}
+                            </span>
+                          )}
+                          {task.blocked_by_title && (
+                            <span title={`متوقفة على: ${task.blocked_by_title}`} style={{ fontSize: 11, color: "#DB2777" }}>🔗</span>
+                          )}
                           {task.total_minutes > 0 && (
                             <span style={{ fontSize: 11, color: "#64748B" }}>⏱ {fmtDur(task.total_minutes)}</span>
                           )}
@@ -1123,6 +1188,63 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                       <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4, lineHeight: 1.6 }}>
                         الإنجاز بيتحسب <b>مرة واحدة للتاسك</b> مهما اتفتحت وقفلت · السجل ده للمراجعة بس
                       </div>
+                    </div>
+                  )}
+
+                  {/* ═══ حالة المحتوى (بند ٧) ═══ */}
+                  {contentStatuses.length > 0 && canEdit && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>
+                        📄 حالة المحتوى <span style={{ color: "#94A3B8", fontWeight: 400 }}>— مستقلة عن حالة التاسك</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <button onClick={() => setContentStatus(showDetail, "")}
+                          style={{ padding: "6px 12px", borderRadius: 20, border: `2px solid ${!showDetail.content_status ? "#64748B" : "#E2E8F0"}`, background: !showDetail.content_status ? "#F1F5F9" : "#F8FAFC", color: "#64748B", fontSize: 12, fontWeight: !showDetail.content_status ? 700 : 500 }}>
+                          بدون
+                        </button>
+                        {contentStatuses.map(cs => {
+                          const on = showDetail.content_status === cs;
+                          return (
+                            <button key={cs} onClick={() => setContentStatus(showDetail, cs)}
+                              style={{ padding: "6px 12px", borderRadius: 20, border: `2px solid ${on ? "#0891B2" : "#E2E8F0"}`, background: on ? "#ECFEFF" : "#F8FAFC", color: on ? "#0891B2" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                              {cs}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ═══ التوقف والتبعية (بند ٦ + ٨) ═══ */}
+                  {showDetail.status === "help_needed" && (showDetail.blocked_reason || showDetail.blocked_by_title) && (
+                    <div style={{ background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 12, padding: "10px 13px", marginBottom: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#DB2777", marginBottom: 4 }}>⏸ سبب التوقف</div>
+                      {showDetail.blocked_reason && <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{showDetail.blocked_reason}</div>}
+                      {showDetail.waiting_on && <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>⏳ منتظرين إجراء من <b style={{ color: "#0F172A" }}>{showDetail.waiting_on}</b></div>}
+                      {showDetail.blocked_by_title && (
+                        <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>
+                          🔗 متوقفة على: <b style={{ color: "#0F172A" }}>{showDetail.blocked_by_title}</b>
+                          <button onClick={() => {
+                            const dep = tasks.find(x => String(x.id) === String(showDetail.blocked_by_task_id));
+                            if (dep) openDetail(dep); else alert("التاسك دي مش في الشهر ده");
+                          }} style={{ background: "none", color: "#2563EB", fontSize: 11, marginRight: 6 }}>افتحها ←</button>
+                        </div>
+                      )}
+                      {canEdit && (
+                        <button onClick={() => clearBlock(showDetail)}
+                          style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700, marginTop: 8 }}>
+                          ✅ التوقف اتحل
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {canEdit && showDetail.status !== "completed" && showDetail.status !== "help_needed" && (
+                    <div style={{ marginBottom: 14 }}>
+                      <button onClick={() => { setBlockForm({ reason: "", waiting_on: "", blocked_by: "" }); setBlockOpen(showDetail); }}
+                        style={{ width: "100%", background: "#FDF2F8", border: "1px solid #FBCFE8", color: "#DB2777", padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+                        ⏸ التاسك متوقفة — سجّل السبب
+                      </button>
                     </div>
                   )}
 
@@ -1581,6 +1703,50 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ نافذة تسجيل التوقف ═══ */}
+      {blockOpen && (
+        <div onClick={e => e.target === e.currentTarget && setBlockOpen(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 330, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 430, maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ textAlign: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 34, marginBottom: 6 }}>⏸</div>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#0F172A" }}>التاسك متوقفة</h3>
+              <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 4 }}>{blockOpen.title}</div>
+            </div>
+
+            <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.7 }}>
+              دي مش «خلصت وراجعها» — دي <b>متوقفة ومحتاجة تدخل</b>. حالتها هتبقى 🆘 طلب نجدة، ولما التوقف يتحل ترجع لحالتها.
+            </div>
+
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>سبب التوقف *</div>
+            <textarea value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} rows={3}
+              placeholder="مستنيين رد العميل · الملف مش جاهز · فيه مشكلة تقنية..." style={{ ...inp, resize: "vertical", marginBottom: 12 }} />
+
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>منتظرين إجراء من مين؟ <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
+            <select value={blockForm.waiting_on} onChange={e => setBlockForm(f => ({ ...f, waiting_on: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
+              <option value="">— حد بره الفريق أو العميل —</option>
+              {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+            </select>
+
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>متوقفة على تاسك تانية؟ <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
+            <select value={blockForm.blocked_by} onChange={e => setBlockForm(f => ({ ...f, blocked_by: e.target.value }))} style={{ ...inp, marginBottom: 14 }}>
+              <option value="">— لأ —</option>
+              {tasks.filter(x => String(x.id) !== String(blockOpen.id) && x.status !== "cancelled").slice(0, 120).map(x => (
+                <option key={x.id} value={x.id}>{x.title} · {x.assigned_to}</option>
+              ))}
+            </select>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveBlock} disabled={savingBlock}
+                style={{ flex: 1, background: savingBlock ? "#94A3B8" : "linear-gradient(135deg,#DB2777,#BE185D)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                {savingBlock ? "..." : "سجّل التوقف"}
+              </button>
+              <button onClick={() => setBlockOpen(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
           </div>
         </div>
       )}
