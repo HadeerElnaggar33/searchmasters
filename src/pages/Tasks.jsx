@@ -94,6 +94,10 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   const [stickers, setStickers] = useState([]);
   const [celebSticker, setCelebSticker] = useState(null);
   const [savingMedal, setSavingMedal] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(null);
+  const [helpForm, setHelpForm] = useState({ helper: "", reason: "" });
+  const [helpReqs, setHelpReqs] = useState([]);
+  const [savingHelp, setSavingHelp] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -136,6 +140,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     if (mb) setTaskMedals(mb);
     if (st) { const o = {}; st.forEach(x => { o[x.key] = x.value; }); setMedalSettings(o); }
     setStickers(await loadStickers());
+    const hr = await sb("help_requests?order=created_at.desc");
+    if (hr) setHelpReqs(hr);
   }
 
   // ── الميداليات المقترحة حسب سياق التاسك (تعديل ٢٦) ──
@@ -329,6 +335,12 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
   async function updateStatus(task, newStatus) {
     const updates = { status: newStatus };
     if (newStatus === "in_progress" && !task.started_at) updates.started_at = new Date().toISOString();
+    if (task.status === "help_needed" && newStatus !== "help_needed") {
+      await sb(`tasks?id=eq.${task.id}`, "PATCH", { help_manual_override: true, status_before_help: null });
+    }
+    if (task.is_help_task && newStatus === "completed") {
+      await closeHelpFor(task);
+    }
     if (newStatus === "needs_revision") {
       await sb(`tasks?id=eq.${task.id}`, "PATCH", { revision_count: Number(task.revision_count || 0) + 1 });
     }
@@ -376,6 +388,82 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
     await addHistory(task.id, "deliverable_added", user.name, deliverUrl || deliverNote);
     setShowDeliver(null); setDeliverUrl(""); setDeliverNote(""); await loadAll();
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
+  }
+
+  // ═══ طلب نجدة «الحقوني» (تعديل ٢٨ + ٣٧) ═══
+  async function sendHelp() {
+    if (!helpOpen) return;
+    if (!helpForm.helper) { alert("اختاري مين تطلبي منه النجدة"); return; }
+    if (!helpForm.reason.trim()) { alert("اكتبي سبب الطلب"); return; }
+    setSavingHelp(true);
+
+    const t = helpOpen;
+    const proj = projects.find(p => String(p.id) === String(t.project_id));
+
+    // تاسك النجدة للشخص المطلوب منه المساعدة
+    const created = await sb("tasks", "POST", {
+      title: `الحقوني — ${t.title}`,
+      project_id: t.project_id || null,
+      assigned_to: helpForm.helper,
+      task_type: t.task_type,
+      priority: t.priority || "high",
+      difficulty: t.difficulty || "medium",
+      status: "todo",
+      month: t.month || CURRENT_MONTH,
+      task_date: today, due_date: t.due_date || today,
+      notes: helpForm.reason.trim(),
+      created_by: user.name,
+      parent_task_id: String(t.id),
+      is_help_task: true,
+    });
+
+    const helpTaskId = created && created[0] ? created[0].id : null;
+
+    await sb("help_requests", "POST", {
+      task_id: String(t.id), task_title: t.title,
+      project_name: proj ? proj.name : null,
+      requester: user.name, helper: helpForm.helper,
+      reason: helpForm.reason.trim(),
+      help_task_id: helpTaskId ? String(helpTaskId) : null,
+      status: "open",
+    });
+
+    // التاسك الأصلية تتحول لحالة «طلب نجدة» مع حفظ حالتها السابقة
+    if (t.status !== "help_needed") {
+      await sb(`tasks?id=eq.${t.id}`, "PATCH", {
+        status_before_help: t.status,
+        status: "help_needed",
+        help_manual_override: false,
+      });
+    }
+
+    await addHistory(t.id, "help_requested", user.name, `طلب نجدة من ${helpForm.helper}: ${helpForm.reason.trim()}`);
+    await addNotification(helpForm.helper,
+      `🆘 ${user.name} بيقول الحقوني في «${t.title}»${proj ? ` — مشروع ${proj.name}` : ""}`,
+      "assign", helpTaskId);
+
+    setSavingHelp(false);
+    setHelpOpen(null);
+    setHelpForm({ helper: "", reason: "" });
+    await loadAll();
+    setShowDetail(null);
+  }
+
+  // إقفال تاسك النجدة يرجّع الأصلية لحالتها
+  async function closeHelpFor(helpTask) {
+    const req = helpReqs.find(r => String(r.help_task_id) === String(helpTask.id) && r.status === "open");
+    if (!req) return;
+    await sb(`help_requests?id=eq.${req.id}`, "PATCH", { status: "done", closed_at: new Date().toISOString() });
+
+    const orig = tasks.find(x => String(x.id) === String(req.task_id));
+    if (orig && orig.status === "help_needed" && !orig.help_manual_override) {
+      await sb(`tasks?id=eq.${orig.id}`, "PATCH", {
+        status: orig.status_before_help || "in_progress",
+        status_before_help: null,
+      });
+      await addHistory(orig.id, "help_done", user.name, `${req.helper} خلّص تاسك النجدة — رجعت لحالتها`);
+    }
+    await addNotification(req.requester, `✅ ${req.helper} خلّص النجدة في «${req.task_title}»`, "done", req.task_id);
   }
 
   // ═══ الرجوع بالتاسك لحالة «لم تبدأ» ═══
@@ -990,6 +1078,49 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
                     </div>
                   )}
 
+                  {/* ═══ طلب نجدة ═══ */}
+                  {(showDetail.assigned_to === user.name || isAdmin) && showDetail.status !== "completed" && !showDetail.is_help_task && (
+                    <div style={{ marginBottom: 14 }}>
+                      <button onClick={() => { setHelpForm({ helper: "", reason: "" }); setHelpOpen(showDetail); }}
+                        style={{ width: "100%", background: "#FDF2F8", border: "1px solid #FBCFE8", color: "#DB2777", padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+                        🆘 الحقوني — اطلب نجدة
+                      </button>
+                    </div>
+                  )}
+
+                  {/* سجل من ساعد في التاسك دي */}
+                  {helpReqs.filter(r => String(r.task_id) === String(showDetail.id)).length > 0 && (
+                    <div style={{ marginBottom: 14 }}>
+                      {helpReqs.filter(r => String(r.task_id) === String(showDetail.id)).map(r => (
+                        <div key={r.id} style={{ background: r.status === "open" ? "#FDF2F8" : "#ECFDF5", border: `1px solid ${r.status === "open" ? "#FBCFE8" : "#A7F3D0"}`, borderRadius: 10, padding: "8px 12px", marginBottom: 5 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A" }}>
+                            🆘 {r.requester} طلب نجدة من {r.helper}
+                            <span style={{ fontSize: 11, color: r.status === "open" ? "#DB2777" : "#059669", marginRight: 6 }}>
+                              · {r.status === "open" ? "جاري" : "خلص"}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{r.reason}</div>
+                          <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 2 }}>
+                            {new Date(r.created_at).toLocaleString("ar-EG")}
+                            {r.closed_at ? ` · خلص ${new Date(r.closed_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short" })}` : ""}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* الانتقال للتاسك الأصلية */}
+                  {showDetail.is_help_task && showDetail.parent_task_id && (
+                    <div style={{ marginBottom: 14 }}>
+                      <button onClick={() => {
+                        const orig = tasks.find(x => String(x.id) === String(showDetail.parent_task_id));
+                        if (orig) openDetail(orig); else alert("التاسك الأصلية مش في الشهر ده");
+                      }} style={{ width: "100%", background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+                        ↩️ روح للتاسك الأصلية
+                      </button>
+                    </div>
+                  )}
+
                   {/* زرار منح ميدالية — للمدير */}
                   {isAdmin && (
                     <div style={{ marginBottom: 14 }}>
@@ -1399,6 +1530,52 @@ export default function Tasks({ user, voiceTrigger, incomingFilter }) {
           </div>
         </div>
       )}
+
+      {/* ═══ نافذة طلب النجدة ═══ */}
+      {helpOpen && (() => {
+        const proj = projects.find(p => String(p.id) === String(helpOpen.project_id));
+        return (
+          <div onClick={e => e.target === e.currentTarget && setHelpOpen(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 330, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 430, boxShadow: "0 12px 40px rgba(15,23,42,0.2)" }}>
+              <div style={{ textAlign: "center", marginBottom: 14 }}>
+                <div style={{ fontSize: 36, marginBottom: 6 }}>🆘</div>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#0F172A" }}>الحقوني</h3>
+              </div>
+
+              <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 12, padding: "10px 13px", marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{helpOpen.title}</div>
+                {proj && <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>📁 {proj.name}</div>}
+              </div>
+
+              <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>مين تطلب منه النجدة؟ *</div>
+              <select value={helpForm.helper} onChange={e => setHelpForm(f => ({ ...f, helper: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
+                <option value="">— اختاري —</option>
+                {members.filter(m => m.name !== user.name).map(m => (
+                  <option key={m.id} value={m.name}>{m.name}{m.role === "admin" ? " (المدير)" : ""}</option>
+                ))}
+              </select>
+
+              <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>محتاج مساعدة في إيه؟ *</div>
+              <textarea value={helpForm.reason} onChange={e => setHelpForm(f => ({ ...f, reason: e.target.value }))} rows={3}
+                placeholder="اشرح باختصار المطلوب..." style={{ ...inp, resize: "vertical", marginBottom: 12 }} />
+
+              <div style={{ background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 10, padding: "9px 12px", fontSize: 11, color: "#DB2777", marginBottom: 14, lineHeight: 1.8 }}>
+                هيتعمل تاسك جديدة باسم «الحقوني — {helpOpen.title}» للشخص اللي تختاريه<br />
+                وحالة التاسك دي هتبقى 🆘 <b>طلب نجدة</b> لحد ما ينهيها، وبعدين ترجع لحالتها
+              </div>
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={sendHelp} disabled={savingHelp}
+                  style={{ flex: 1, background: savingHelp ? "#94A3B8" : "linear-gradient(135deg,#DB2777,#BE185D)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                  {savingHelp ? "..." : "ابعت الطلب 🆘"}
+                </button>
+                <button onClick={() => setHelpOpen(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ منح ميدالية من داخل التاسك ═══ */}
       {medalOpen && (() => {
