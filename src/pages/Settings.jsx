@@ -116,6 +116,11 @@ export default function Settings({ user }) {
   const [stForm, setStForm] = useState({ name: "", category: "مود", places: ["mood"], situation: "none", rate: "normal", start_date: "", end_date: "" });
   const [stFile, setStFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [editSticker, setEditSticker] = useState(null);
+  const [editFile, setEditFile] = useState(null);
+  const [editMsg, setEditMsg] = useState(null);
+  const [editSentence, setEditSentence] = useState(null);
+  const [editHoliday, setEditHoliday] = useState(null);
   const [log, setLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState("");
@@ -289,6 +294,52 @@ export default function Settings({ user }) {
     await load();
   }
 
+  async function saveStickerEdit() {
+    const x = editSticker;
+    if (!x.name.trim()) { alert("اكتبي الاسم"); return; }
+    if ((x.places || []).length === 0) { alert("حددي مكان ظهور واحد على الأقل"); return; }
+    setUploading(true);
+    let url = x.image_url;
+    if (editFile) {
+      if (editFile.size > 400 * 1024) { setUploading(false); alert("الصورة أكبر من 400 كيلوبايت"); return; }
+      const up = await uploadSticker(editFile, SB_URL, SB_KEY);
+      if (!up || up.error) { setUploading(false); alert("رفع الصورة فشل — " + ((up && up.error) || "")); return; }
+      url = up.url;
+    }
+    await sb(`stickers?id=eq.${x.id}`, "PATCH", {
+      name: x.name.trim(), image_url: url, category: x.category,
+      places: (x.places || []).join(","), situation: x.situation, rate: x.rate,
+      start_date: x.start_date || null, end_date: x.end_date || null,
+    });
+    await writeLog("تعديل استيكر", "", x.name.trim());
+    setUploading(false); setEditSticker(null); setEditFile(null);
+    flash("✅ اتحفظ");
+    await load();
+  }
+
+  async function saveMsgEdit() {
+    if (!editMsg.text.trim()) return;
+    await sb(`motivation_messages?id=eq.${editMsg.id}`, "PATCH", { text: editMsg.text.trim(), trigger_key: editMsg.trigger_key });
+    await writeLog("تعديل رسالة تحفيزية", "", editMsg.text.trim());
+    setEditMsg(null); flash("✅ اتحفظت"); await load();
+  }
+
+  async function saveSentenceEdit() {
+    if (!editSentence.text.trim()) return;
+    await sb(`day_sentences?id=eq.${editSentence.id}`, "PATCH", { text: editSentence.text.trim(), category: editSentence.category });
+    setEditSentence(null); flash("✅ اتحفظت"); await load();
+  }
+
+  async function saveHolidayEdit() {
+    if (!editHoliday.name.trim()) return;
+    const target = editHoliday.range_id
+      ? `holidays?range_id=eq.${editHoliday.range_id}`
+      : `holidays?id=eq.${editHoliday.id}`;
+    await sb(target, "PATCH", { name: editHoliday.name.trim() });
+    await writeLog("تعديل اسم عطلة", "", editHoliday.name.trim());
+    setEditHoliday(null); flash("✅ اتحفظ"); await load();
+  }
+
   async function toggleSticker(x) {
     await sb(`stickers?id=eq.${x.id}`, "PATCH", { is_active: x.is_active === false });
     await load();
@@ -414,6 +465,7 @@ export default function Settings({ user }) {
                           {g.dates.length === 1 ? fmtD(g.dates[0]) : `${fmtD(g.dates[0])} → ${fmtD(g.dates[g.dates.length - 1])} · ${g.dates.length} أيام`}
                         </div>
                       </div>
+                      <button onClick={() => setEditHoliday({ ...g })} style={{ background: "none", color: "#2563EB", fontSize: 14 }}>✏️</button>
                       <button onClick={() => setConfirmDel(g)} style={{ background: "none", color: "#DC2626", fontSize: 15 }}>🗑</button>
                     </div>
                   ))}
@@ -567,7 +619,9 @@ export default function Settings({ user }) {
                       <div style={{ fontSize: 9, color: "#94A3B8", marginTop: 2 }}>
                         {parsePlaces(x.places).length} مكان · {(RATES.find(r => r[0] === x.rate) || [])[1]}
                       </div>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 6 }}>
+                      <div style={{ display: "flex", gap: 7, justifyContent: "center", marginTop: 6 }}>
+                        <button onClick={() => { setEditSticker({ ...x, places: parsePlaces(x.places) }); setEditFile(null); }}
+                          style={{ background: "none", color: "#2563EB", fontSize: 11 }}>✏️</button>
                         <button onClick={() => toggleSticker(x)} style={{ background: "none", color: x.is_active === false ? "#DC2626" : "#059669", fontSize: 10, fontWeight: 700 }}>
                           {x.is_active === false ? "موقوف" : "مفعّل"}
                         </button>
@@ -668,6 +722,7 @@ export default function Settings({ user }) {
                 <div key={m.id} style={{ background: m.is_active ? "#F8FAFC" : "#FEF2F2", border: "1px solid #E2E8F0", borderRadius: 9, padding: "7px 11px", display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A" }}>{m.text}</span>
                   <span style={{ fontSize: 9, color: "#94A3B8" }}>{m.trigger_key}</span>
+                  <button onClick={() => setEditMsg({ ...m })} style={{ background: "none", color: "#2563EB", fontSize: 11 }}>✏️</button>
                   <button onClick={() => toggleMsg(m)} style={{ background: "none", color: m.is_active ? "#059669" : "#DC2626", fontSize: 11, fontWeight: 700 }}>{m.is_active ? "مفعّلة" : "موقوفة"}</button>
                 </div>
               ))}
@@ -688,6 +743,7 @@ export default function Settings({ user }) {
                 <div key={x.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 9, padding: "7px 11px", display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A" }}>{x.text}</span>
                   <span style={{ fontSize: 9, color: "#94A3B8" }}>{x.category}</span>
+                  <button onClick={() => setEditSentence({ ...x })} style={{ background: "none", color: "#2563EB", fontSize: 12 }}>✏️</button>
                   <button onClick={() => delSentence(x)} style={{ background: "none", color: "#DC2626", fontSize: 13 }}>🗑</button>
                 </div>
               ))}
@@ -795,6 +851,133 @@ export default function Settings({ user }) {
               </div>
             ))
           }
+        </div>
+      )}
+
+      {/* ═══ تعديل استيكر ═══ */}
+      {editSticker && (
+        <div onClick={e => e.target === e.currentTarget && setEditSticker(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 440, maxHeight: "92vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(15,23,42,0.2)" }}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>✏️ تعديل الاستيكر</h3>
+
+            <div style={{ textAlign: "center", marginBottom: 12 }}>
+              <img src={editFile ? URL.createObjectURL(editFile) : editSticker.image_url} alt=""
+                style={{ width: 80, height: 80, objectFit: "contain" }} />
+            </div>
+
+            <div style={label}>تغيير الصورة <span style={{ color: "#94A3B8", fontWeight: 400 }}>— سيبيها لو مش عايزة تغيريها</span></div>
+            <input type="file" accept="image/*" onChange={e => setEditFile(e.target.files && e.target.files[0])}
+              style={{ ...inp, padding: "8px 10px", fontSize: 12, marginBottom: 10 }} />
+
+            <div style={label}>الاسم</div>
+            <input value={editSticker.name} onChange={e => setEditSticker(f => ({ ...f, name: e.target.value }))} style={{ ...inp, marginBottom: 10 }} />
+
+            <div style={label}>التصنيف</div>
+            <select value={editSticker.category} onChange={e => setEditSticker(f => ({ ...f, category: e.target.value }))} style={{ ...inp, marginBottom: 10 }}>
+              {STICKER_CATS.map(c2 => <option key={c2} value={c2}>{c2}</option>)}
+            </select>
+
+            <div style={label}>أماكن الظهور</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {PLACES.map(([v, l]) => {
+                const on = (editSticker.places || []).includes(v);
+                return (
+                  <button key={v} onClick={() => setEditSticker(f => ({ ...f, places: on ? f.places.filter(x => x !== v) : [...(f.places || []), v] }))}
+                    style={{ padding: "6px 12px", borderRadius: 20, border: `2px solid ${on ? "#7C3AED" : "#E2E8F0"}`, background: on ? "#F5F3FF" : "#F8FAFC", color: on ? "#7C3AED" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                    {on ? "✓ " : ""}{l}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={label}>حالة الظهور</div>
+            <select value={editSticker.situation || "none"} onChange={e => setEditSticker(f => ({ ...f, situation: e.target.value }))} style={{ ...inp, marginBottom: 10 }}>
+              {SITUATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+
+            <div style={label}>معدل الظهور</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              {RATES.map(([v, l]) => {
+                const on = (editSticker.rate || "normal") === v;
+                return (
+                  <button key={v} onClick={() => setEditSticker(f => ({ ...f, rate: v }))}
+                    style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#EFF6FF" : "#F8FAFC", color: on ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>{l}</button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+              <div><div style={label}>من تاريخ</div><input type="date" value={editSticker.start_date ? String(editSticker.start_date).slice(0,10) : ""} onChange={e => setEditSticker(f => ({ ...f, start_date: e.target.value }))} style={inp} /></div>
+              <div><div style={label}>إلى تاريخ</div><input type="date" value={editSticker.end_date ? String(editSticker.end_date).slice(0,10) : ""} onChange={e => setEditSticker(f => ({ ...f, end_date: e.target.value }))} style={inp} /></div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveStickerEdit} disabled={uploading}
+                style={{ flex: 1, background: uploading ? "#94A3B8" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>
+                {uploading ? "جاري الحفظ..." : "حفظ ✓"}
+              </button>
+              <button onClick={() => { setEditSticker(null); setEditFile(null); }} style={{ background: "#F1F5F9", color: "#64748B", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ تعديل رسالة تحفيزية ═══ */}
+      {editMsg && (
+        <div onClick={e => e.target === e.currentTarget && setEditMsg(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 420 }}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>✏️ تعديل الرسالة</h3>
+            <div style={label}>النص · [الاسم] بيتبدل باسم العضو</div>
+            <textarea value={editMsg.text} onChange={e => setEditMsg(f => ({ ...f, text: e.target.value }))} rows={3} style={{ ...inp, resize: "vertical", marginBottom: 10 }} />
+            <div style={label}>الشرط</div>
+            <select value={editMsg.trigger_key} onChange={e => setEditMsg(f => ({ ...f, trigger_key: e.target.value }))} style={{ ...inp, marginBottom: 14 }}>
+              {triggerKeys.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveMsgEdit} style={{ flex: 1, background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>حفظ ✓</button>
+              <button onClick={() => setEditMsg(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ تعديل جملة اليوم ═══ */}
+      {editSentence && (
+        <div onClick={e => e.target === e.currentTarget && setEditSentence(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 400 }}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>✏️ تعديل الجملة</h3>
+            <textarea value={editSentence.text} onChange={e => setEditSentence(f => ({ ...f, text: e.target.value }))} rows={2} style={{ ...inp, resize: "vertical", marginBottom: 10 }} />
+            <select value={editSentence.category} onChange={e => setEditSentence(f => ({ ...f, category: e.target.value }))} style={{ ...inp, marginBottom: 14 }}>
+              {["هادية", "تحفيزية", "عن الفريق", "عن التنظيم", "خفيفة"].map(c2 => <option key={c2} value={c2}>{c2}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveSentenceEdit} style={{ flex: 1, background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>حفظ ✓</button>
+              <button onClick={() => setEditSentence(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ تعديل اسم العطلة ═══ */}
+      {editHoliday && (
+        <div onClick={e => e.target === e.currentTarget && setEditHoliday(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 380 }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>✏️ تعديل العطلة</h3>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 12 }}>
+              {editHoliday.dates && editHoliday.dates.length > 1 ? `${editHoliday.dates.length} أيام` : (editHoliday.dates || [])[0]}
+              {" · "}لتغيير التواريخ احذفيها وضيفيها من جديد
+            </div>
+            <div style={label}>الاسم</div>
+            <input value={editHoliday.name} onChange={e => setEditHoliday(f => ({ ...f, name: e.target.value }))} style={{ ...inp, marginBottom: 14 }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveHolidayEdit} style={{ flex: 1, background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>حفظ ✓</button>
+              <button onClick={() => setEditHoliday(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
         </div>
       )}
 
