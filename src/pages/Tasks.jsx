@@ -3,7 +3,7 @@ import { sb, addHistory, addNotification, STATUS_CONFIG, PRIORITY_CONFIG, format
 import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWorkHours,
   DIFFICULTY, loadPointsConfig, computeTaskPoints, initiativePoints, longestSessionOf } from "../score.js";
 import { speechSupported, createRecognizer, parseTranscript } from "../voice.js";
-import { activeTimer, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTime, fmtDur, fmtClock } from "../timer.js";
+import { activeTimers, activeTimerFor, startTimer, stopTimer, taskHasTime, noticeClosedWithoutTime, fmtDur, fmtClock } from "../timer.js";
 import { GRADES, IMPACT, medalPoints } from "../badges.js";
 import { loadStickers, pickSticker } from "../stickers.js";
 import { labelList } from "../utils/linkLabel.js";
@@ -133,7 +133,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   const [parsed, setParsed] = useState(null);
   const [voiceErr, setVoiceErr] = useState("");
   const recRef = useRef(null);
-  const [timer, setTimer] = useState(null);        // الجلسة الشغالة
+  const [runningTimers, setRunningTimers] = useState([]);   // كل الجلسات الشغالة
   const [tick, setTick] = useState(0);             // عداد الثواني
   const [nudge, setNudge] = useState(false);       // تنبيه تشغيل الوقت
   const nudgeRef = useRef(null);
@@ -149,7 +149,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     title: "", project_id: "", assigned_to: user.name, helpers: [],
     task_type: (taskTypes[0] && taskTypes[0].name) || "Other", status: "todo", priority: "medium",
     month: CURRENT_MONTH, task_date: today, due_date: today, notes: "", attachments: "",
-    difficulty: "medium",
+    difficulty: "medium", start_date: "",
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -237,36 +237,35 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   }
 
   // ── التايمر الشغال + العداد ──
-  useEffect(() => { activeTimer(user.name).then(setTimer); }, [user.name]);
+  useEffect(() => { activeTimers(user.name).then(setRunningTimers); }, [user.name]);
+  const timerOf = id => runningTimers.find(t => String(t.task_id) === String(id)) || null;
 
   useEffect(() => {
-    if (!timer) return;
+    if (runningTimers.length === 0) return;
     const t = setInterval(() => setTick(x => x + 1), 1000);
     return () => clearInterval(t);
-  }, [timer]);
+  }, [runningTimers.length]);
 
   // ── تنبيه: تاسك شغالة والتايمر مقفول ──
   useEffect(() => {
     const running = tasks.filter(t => t.assigned_to === user.name && t.status === "in_progress");
-    const needs = running.length > 0 && !timer;
+    const needs = running.length > 0 && runningTimers.length === 0;
     setNudge(needs);
     if (nudgeRef.current) clearInterval(nudgeRef.current);
     if (needs) {
       nudgeRef.current = setInterval(() => setNudge(true), 15 * 60 * 1000);
     }
     return () => { if (nudgeRef.current) clearInterval(nudgeRef.current); };
-  }, [tasks, timer, user.name]);
+  }, [tasks, runningTimers.length, user.name]);
 
   async function toggleTimer(task) {
-    if (timer && String(timer.task_id) === String(task.id)) {
-      await stopTimer(user.name);
-      setTimer(null);
+    if (timerOf(task.id)) {
+      await stopTimer(user.name, task.id);
     } else {
       const proj = projects.find(p => String(p.id) === String(task.project_id));
-      const t = await startTimer(task, user.name, proj?.name);
-      setTimer(t);
-      setTick(0);
+      await startTimer(task, user.name, proj && proj.name);
     }
+    setRunningTimers(await activeTimers(user.name));
     await loadAll();
   }
 
@@ -348,6 +347,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
       due_date: form.task_date || null, task_date: form.task_date || null,
       notes: form.notes, attachments: form.attachments, created_by: user.name,
       difficulty: form.difficulty || "medium",
+      start_date: form.start_date || null,
       helpers: form.helpers.length ? form.helpers.join(", ") : null,
     };
     const res = await sb("tasks", "POST", payload);
@@ -385,6 +385,14 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   }
 
   async function updateStatus(task, newStatus) {
+    // تنبيه لو التايمر شغال والحالة بتتغير لحاجة غير Completed
+    if (timerOf(task.id) && newStatus !== "completed") {
+      const stop = window.confirm("التايمر شغال على التاسك دي.\n\nموافقة = أوقف التايمر مع تغيير الحالة\nإلغاء = سيبيه شغال وكمّلي");
+      if (stop) {
+        await stopTimer(user.name, task.id);
+        setRunningTimers(await activeTimers(user.name));
+      }
+    }
     const updates = { status: newStatus };
     if (newStatus === "in_progress" && !task.started_at) updates.started_at = new Date().toISOString();
     // إعادة فتح تاسك مكتملة: نمسح وقت الإكمال ونسجّل مرة الفتح
@@ -411,7 +419,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     await addHistory(task.id, "status_changed", user.name, `${STATUS_CONFIG[task.status]?.label} → ${STATUS_CONFIG[newStatus]?.label}`);
     if (newStatus === "completed") {
       await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
-      if (timer && String(timer.task_id) === String(task.id)) { await stopTimer(user.name); setTimer(null); }
+      if (timerOf(task.id)) { await stopTimer(user.name, task.id); setRunningTimers(await activeTimers(user.name)); }
       const hadTime = await taskHasTime(task.id);
       if (!hadTime && task.assigned_to === user.name) await noticeClosedWithoutTime(task, user.name);
       await awardTaskPoints(task);
@@ -535,7 +543,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
 
   // ═══ إنهاء التاسك مباشرة من غير مراجعة ═══
   async function finishDirect(task) {
-    if (timer && String(timer.task_id) === String(task.id)) { await stopTimer(user.name); setTimer(null); }
+    if (timerOf(task.id)) { await stopTimer(user.name, task.id); setRunningTimers(await activeTimers(user.name)); }
     const hadTime = await taskHasTime(task.id);
     if (!hadTime && task.assigned_to === user.name) await noticeClosedWithoutTime(task, user.name);
 
@@ -662,7 +670,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
       });
     }
 
-    if (timer && String(timer.task_id) === String(task.id)) { await stopTimer(user.name); setTimer(null); }
+    if (timerOf(task.id)) { await stopTimer(user.name, task.id); setRunningTimers(await activeTimers(user.name)); }
     await addHistory(task.id, "completed", user.name, "كل المراجعين اعتمدوا");
     await addNotification(task.assigned_to, `🎉 «${task.title}» اتعمدت بالكامل · +${bonus} بونص`, "done", task.id);
 
@@ -813,9 +821,9 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
       await sb(`tasks?id=eq.${task.id}`, "PATCH", { completed_at: null, reopen_count: Number(task.reopen_count || 0) + 1 });
     }
     // لو التايمر شغال عليها، نوقفه الأول عشان الوقت ما يضيعش
-    if (timer && String(timer.task_id) === String(task.id)) {
-      await stopTimer(user.name);
-      setTimer(null);
+    if (timerOf(task.id)) {
+      await stopTimer(user.name, task.id);
+      setRunningTimers(await activeTimers(user.name));
     }
     await sb(`tasks?id=eq.${task.id}`, "PATCH", { status: "todo", started_at: null });
     await addHistory(task.id, "reverted", user.name, "رجعت لحالة «لم تبدأ»");
@@ -1080,7 +1088,17 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     return true;
   });
 
-  const filtered = baseFiltered.filter(inDayView);
+  // ترتيب تلقائي: تايمر شغال ← In Progress ← To Do ← الباقي (فوق أي فلاتر)
+  function sortRank(t) {
+    if (t.status === "in_progress" && timerOf(t.id)) return 0;
+    if (t.status === "in_progress") return 1;
+    if (t.status === "todo") return 2;
+    return 3;
+  }
+  const filtered = baseFiltered.filter(inDayView)
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => (sortRank(a.t) - sortRank(b.t)) || (a.i - b.i))
+    .map(x => x.t);
 
   const HelperPicker = ({ value, owner, onChange }) => {
     const list = value || [];
@@ -1229,6 +1247,37 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
           🍳 <b>المطبخ:</b> تاسكات ليها مسؤول ولسه مالهاش تاريخ تسليم · <b>مستبعدة من النقاط ومؤشر الضغط</b> · أول ما تحطي تاريخ بتخرج لـ To Do لوحدها
         </div>
       )}
+
+      {/* ═══ عدادات الحالة القابلة للضغط (بند ٦) ═══ */}
+      {(() => {
+        const inProg = baseFiltered.filter(t => t.status === "in_progress").length;
+        const todoN  = baseFiltered.filter(t => t.status === "todo").length;
+        const chip = (key, label, n, col, bg) => {
+          const on = filterStatus === key;
+          return (
+            <button onClick={() => { setFilterStatus(on ? "all" : key); setPageSize(40); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 7,
+                padding: "8px 15px", borderRadius: 12,
+                border: `2px solid ${on ? col : "#E2E8F0"}`,
+                background: on ? bg : "#FFFFFF",
+                color: on ? col : "#64748B",
+                fontSize: 13, fontWeight: on ? 800 : 600,
+                boxShadow: on ? `0 2px 8px ${col}22` : "none",
+              }}>
+              <span>{label}</span>
+              <span style={{ fontSize: 15, fontWeight: 800 }}>{n}</span>
+              {on && <span style={{ fontSize: 11 }}>✕</span>}
+            </button>
+          );
+        };
+        return (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            {chip("in_progress", "⚡ جاري التنفيذ", inProg, "#2563EB", "#EFF6FF")}
+            {chip("todo", "⬜ لم تبدأ", todoN, "#64748B", "#F1F5F9")}
+          </div>
+        );
+      })()}
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
@@ -1397,6 +1446,17 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                     اليوم {form.task_date && <span style={{ color: "#2563EB", fontSize: 11 }}>— {getDayName(form.task_date)}</span>}
                   </div>
                   <input type="date" value={form.task_date} onChange={e => setForm(f => ({ ...f, task_date: e.target.value, due_date: e.target.value }))} style={inp} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>
+                    تاريخ البداية <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span>
+                  </div>
+                  <input type="date" value={form.start_date || ""} max={form.task_date || undefined}
+                    onChange={e => {
+                      const v = e.target.value;
+                      if (v && form.task_date && v > form.task_date) { alert("تاريخ البداية لازم يكون قبل التسليم أو نفس اليوم"); return; }
+                      setForm(f => ({ ...f, start_date: v }));
+                    }} style={inp} />
                 </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -1918,6 +1978,20 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                   )}
 
                   {/* زرار التقييم — للمدير */}
+                  {showDetail.start_date && (
+                    <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: "#2563EB" }}>
+                      🗓 مفتوحة للتنفيذ من <b>{formatDate(String(showDetail.start_date).slice(0,10))}</b>
+                      {showDetail.due_date ? <> لحد <b>{formatDate(String(showDetail.due_date).slice(0,10))}</b></> : null}
+                    </div>
+                  )}
+
+                  {showDetail.status === "completed" && showDetail.total_minutes > 0 && (
+                    <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 10, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: "#059669" }}>
+                      ⏱ الوقت الكلي على التاسك: <b style={{ fontSize: 14 }}>{fmtDur(showDetail.total_minutes)}</b>
+                      <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3 }}>ده وقت التاسك · منفصل تماماً عن ساعات العمل الشهرية</div>
+                    </div>
+                  )}
+
                   {(showDetail.points_awarded != null || showDetail.difficulty) && (
                     <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                       {showDetail.difficulty && (
@@ -1942,9 +2016,12 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                   {showDetail.assigned_to === user.name && showDetail.status !== "completed" && (
                     <div style={{ marginBottom: 14 }}>
                       <button onClick={() => toggleTimer(showDetail)}
-                        style={{ width: "100%", background: (timer && String(timer.task_id) === String(showDetail.id)) ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${(timer && String(timer.task_id) === String(showDetail.id)) ? "#FECACA" : "#A7F3D0"}`, color: (timer && String(timer.task_id) === String(showDetail.id)) ? "#DC2626" : "#059669", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>
-                        {(timer && String(timer.task_id) === String(showDetail.id)) ? "⏹ وقّفي الوقت" : "▶️ شغّلي الوقت"}
+                        style={{ width: "100%", background: !!timerOf(showDetail.id) ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${!!timerOf(showDetail.id) ? "#FECACA" : "#A7F3D0"}`, color: !!timerOf(showDetail.id) ? "#DC2626" : "#059669", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>
+                        {!!timerOf(showDetail.id) ? "⏹ وقّفي الوقت" : "▶️ شغّلي الوقت"}
                       </button>
+                      <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 6, textAlign: "center", lineHeight: 1.6 }}>
+                        تقدري تشغّلي تايمر على أكتر من تاسك في نفس الوقت — ده طبيعي ومسموح
+                      </div>
                       {showDetail.total_minutes > 0 && (
                         <div style={{ fontSize: 11, color: "#64748B", marginTop: 6, textAlign: "center" }}>
                           الوقت المسجّل على التاسك دي: <b style={{ color: "#0F172A" }}>{fmtDur(showDetail.total_minutes)}</b>
@@ -2256,22 +2333,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
       )}
 
       {/* ═══ شريط التايمر ═══ */}
-      {timer && (
-        <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 20 }}>⏱</span>
-          <div style={{ flex: 1, minWidth: 140 }}>
-            <div style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}>التايمر شغال</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{timer.task_title}</div>
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#059669", fontVariantNumeric: "tabular-nums" }}>
-            {fmtClock(Math.floor((Date.now() - new Date(timer.started_at)) / 1000) + tick * 0)}
-          </div>
-          <button onClick={() => toggleTimer({ id: timer.task_id, title: timer.task_title })}
-            style={{ background: "#DC2626", color: "#fff", padding: "7px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>⏹ إيقاف</button>
-        </div>
-      )}
-
-      {nudge && !timer && (
+      {nudge && runningTimers.length === 0 && (
         <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 14, padding: "11px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 18 }}>⏱</span>
           <span style={{ flex: 1, minWidth: 150, fontSize: 13, color: "#D97706", fontWeight: 600 }}>ماتنساش تشغّل الوقت على التاسك اللي شغال عليها</span>
