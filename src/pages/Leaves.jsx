@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { inRange } from "../timeFilter.js";
 import TimeBar from "./TimeBar.jsx";
 import { sb, addNotification, formatDate } from "../supabase.js";
@@ -419,7 +420,7 @@ export default function Leaves({ user }) {
               return (
                 <div key={m.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "10px 12px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{m.name[0]}</div>
+                    <Avatar member={m} size={28} />
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", flex: 1, minWidth: 0 }}>{m.name}</span>
                     <span style={{ fontSize: 12, color: "#64748B" }}>
                       مستخدم <b style={{ color: "#D97706" }}>{b.used}</b> · متبقي <b style={{ color: "#059669" }}>{b.remaining}</b> من {b.total}
