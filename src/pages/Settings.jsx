@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb, MONTHS } from "../supabase.js";
 import { WEEKDAYS, loadWorkConfig, saveWorkingDays, countWorkingDays } from "../workdays.js";
 import { STICKER_CATS, PLACES, SITUATIONS, RATES, parsePlaces, uploadSticker } from "../stickers.js";
@@ -551,7 +552,7 @@ export default function Settings({ user }) {
             <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 12 }}>لكل عضو على حدة · لو سيبتيه فاضي بيستخدم الحساب العام (أيام العمل × ساعات اليوم)</div>
             {members.filter(m => m.is_active !== false).map(m => (
               <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 12px", marginBottom: 6, flexWrap: "wrap" }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+                <Avatar member={m} size={28} />
                 <span style={{ flex: 1, minWidth: 90, fontSize: 13, fontWeight: 600, color: "#0F172A" }}>{m.name}</span>
                 <input type="number" min="0" defaultValue={m.monthly_target_hours == null ? "" : m.monthly_target_hours} placeholder="تلقائي"
                   onBlur={e => saveTarget(m, e.target.value)}
@@ -833,7 +834,7 @@ export default function Settings({ user }) {
           </div>
           {members.map(m => (
             <div key={m.id} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 12, padding: "10px 13px", marginBottom: 7, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: m.is_active === false ? 0.55 : 1 }}>
-              <div style={{ width: 30, height: 30, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+              <Avatar member={m} size={30} />
               <div style={{ flex: 1, minWidth: 110 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{m.name}</div>
                 <div style={{ fontSize: 11, color: "#94A3B8" }}>
