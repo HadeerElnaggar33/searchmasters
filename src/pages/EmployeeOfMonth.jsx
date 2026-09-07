@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb, sbUpload, addNotification, formatDate, MONTHS, CURRENT_MONTH } from "../supabase.js";
 import { loadLedger, totalsFrom } from "../score.js";
 
@@ -339,9 +340,7 @@ export default function EmployeeOfMonth({ user }) {
         {monthWinner ? (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
-              <div style={{ width: 60, height: 60, borderRadius: "50%", background: members.find(m => m.name === monthWinner.member_name)?.avatar_color || "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 800, color: "#fff", flexShrink: 0 }}>
-                {monthWinner.member_name[0]}
-              </div>
+              <Avatar name={monthWinner.member_name} members={members} color="#D97706" size={60} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 2 }}>{monthWinner.month}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: "#0F172A" }}>🏆 {monthWinner.member_name}</div>
@@ -450,7 +449,7 @@ export default function EmployeeOfMonth({ user }) {
                   <div key={m.id} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 14, padding: 14 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 20 }}>{["🥇", "🥈", "🥉"][i] || "🏅"}</span>
-                      <div style={{ width: 36, height: 36, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{m.name[0]}</div>
+                      <Avatar member={m} size={36} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>{m.name}</div>
                         <div style={{ fontSize: 11, color: "#94A3B8" }}>{m.job_title}</div>
@@ -487,7 +486,7 @@ export default function EmployeeOfMonth({ user }) {
               <div key={m.id} style={{ border: `1px solid ${isStrong ? "#FDE68A" : "#E2E8F0"}`, background: isStrong ? "#FFFBEB" : "#F8FAFC", borderRadius: 14, padding: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 12, color: "#94A3B8", width: 18, flexShrink: 0 }}>{i + 1}.</span>
-                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{m.name[0]}</div>
+                  <Avatar member={m} size={34} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>
                       {m.name}
@@ -574,7 +573,7 @@ export default function EmployeeOfMonth({ user }) {
               {winners.map(w => (
                 <div key={w.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 12, padding: "12px 14px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: members.find(m => m.name === w.member_name)?.avatar_color || "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{w.member_name[0]}</div>
+                    <Avatar name={w.member_name} members={members} color="#D97706" size={32} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>🏆 {w.member_name}</div>
                       <div style={{ fontSize: 11, color: "#94A3B8" }}>{w.month}{w.prize_name ? ` · 🎁 ${w.prize_name}` : ""}</div>
