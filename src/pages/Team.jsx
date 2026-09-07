@@ -11,7 +11,8 @@ export default function Team({ user }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(true);
   const isAdmin = user.role === "admin";
-  const [form, setForm] = useState({ name: "", role: "employee", email: "", job_title: "", avatar_color: "#2563EB" });
+  const [form, setForm] = useState({ name: "", role: "employee", email: "", job_title: "", avatar_color: "#2563EB",
+    joined_at: "", monthly_target_hours: "", grace_days: 30, leave_mode: "prorated", can_assign_tasks: false });
 
   useEffect(() => { loadAll(); }, []);
 
@@ -29,10 +30,45 @@ export default function Team({ user }) {
 
   async function addMember() {
     if (!form.name.trim()) return;
-    await sb("team_members", "POST", form);
+    const joined = form.joined_at || new Date().toISOString().slice(0, 10);
+    const graceDays = Number(form.grace_days) || 30;
+    const g = new Date(joined + "T00:00:00");
+    g.setDate(g.getDate() + graceDays);
+
+    const payload = {
+      name: form.name, role: form.role, email: form.email, job_title: form.job_title,
+      avatar_color: form.avatar_color,
+      joined_at: joined,
+      monthly_target_hours: form.monthly_target_hours === "" ? null : Number(form.monthly_target_hours),
+      grace_until: g.toISOString().slice(0, 10),
+      can_assign_tasks: !!form.can_assign_tasks,
+    };
+    const created = await sb("team_members", "POST", payload);
+
+    // رصيد الإجازات: كامل أو بالتناسب مع باقي السنة
+    const year = new Date(joined + "T00:00:00").getFullYear();
+    const st = await sb("app_settings?key=eq.leave_entitlement");
+    const full = st && st[0] ? Number(st[0].value) : 14;
+    let entitlement = full;
+    if (form.leave_mode === "prorated") {
+      const monthsLeft = 12 - new Date(joined + "T00:00:00").getMonth();
+      entitlement = Math.round((full * monthsLeft) / 12);
+    }
+    await sb("leave_balances", "POST", {
+      member_name: form.name, year, entitlement, carried_over: 0,
+    });
+
+    // رسالة ترحيب
+    await sb("notifications", "POST", {
+      recipient: form.name, type: "info",
+      content: `👋 أهلاً بيك في الفريق · إنت في فترة تعارف ${graceDays} يوم، مفيش مقارنات ولا تنبيهات فيها`,
+    });
+
     await loadAll();
     setShowAdd(false);
-    setForm({ name: "", role: "employee", email: "", job_title: "", avatar_color: "#2563EB" });
+    setForm({ name: "", role: "employee", email: "", job_title: "", avatar_color: "#2563EB",
+      joined_at: "", monthly_target_hours: "", grace_days: 30, leave_mode: "prorated", can_assign_tasks: false });
+    if (created) alert(`✅ اتضاف ${payload.name}\n\nرصيد إجازات: ${entitlement} يوم\nفترة التعارف: لحد ${payload.grace_until}`);
   }
 
   async function updateRole(m, role) {
@@ -125,6 +161,49 @@ export default function Team({ user }) {
               <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="الاسم *" style={inp} />
               <input value={form.job_title} onChange={e => setForm(f => ({ ...f, job_title: e.target.value }))} placeholder="المسمى الوظيفي" style={inp} />
               <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="البريد الإلكتروني" style={{ ...inp, direction: "ltr" }} />
+
+              <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#2563EB" }}>👋 إعدادات الانضمام</div>
+
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>تاريخ الانضمام</div>
+                  <input type="date" value={form.joined_at} onChange={e => setForm(f => ({ ...f, joined_at: e.target.value }))} style={inp} />
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>
+                    الهدف الشهري للساعات <span style={{ color: "#94A3B8", fontWeight: 400 }}>— فاضي = الحساب العام</span>
+                  </div>
+                  <input type="number" min="0" value={form.monthly_target_hours}
+                    onChange={e => setForm(f => ({ ...f, monthly_target_hours: e.target.value }))} placeholder="تلقائي" style={inp} />
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>رصيد الإجازات</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {[["prorated", "بالتناسب مع باقي السنة"], ["full", "الرصيد كامل"]].map(([v, l]) => {
+                      const on = form.leave_mode === v;
+                      return (
+                        <button key={v} type="button" onClick={() => setForm(f => ({ ...f, leave_mode: v }))}
+                          style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#FFFFFF" : "#F8FAFC", color: on ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>{l}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>
+                    فترة التعارف <span style={{ color: "#94A3B8", fontWeight: 400 }}>— مفيش مقارنات ولا تنبيهات فيها</span>
+                  </div>
+                  <input type="number" min="0" value={form.grace_days}
+                    onChange={e => setForm(f => ({ ...f, grace_days: e.target.value }))} style={inp} />
+                </div>
+
+                <button type="button" onClick={() => setForm(f => ({ ...f, can_assign_tasks: !f.can_assign_tasks }))}
+                  style={{ background: form.can_assign_tasks ? "#ECFDF5" : "#F8FAFC", border: `1.5px solid ${form.can_assign_tasks ? "#A7F3D0" : "#E2E8F0"}`, color: form.can_assign_tasks ? "#059669" : "#94A3B8", padding: "8px", borderRadius: 10, fontSize: 12, fontWeight: 700 }}>
+                  {form.can_assign_tasks ? "✓ يقدر يضيف تاسكات للفريق" : "مش بيضيف تاسكات"}
+                </button>
+              </div>
               <div>
                 <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>الصلاحية</div>
                 <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={inp}>
