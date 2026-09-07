@@ -75,7 +75,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   const [history, setHistory] = useState([]);
   const [newComment, setNewComment] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterAssignee, setFilterAssignee] = useState("all");
+  const [filterAssignee, setFilterAssignee] = useState(user.name);
   const [filterProject, setFilterProject] = useState("all");
   const [filterType, setFilterType] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
@@ -114,6 +114,10 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   const [savingHelp, setSavingHelp] = useState(false);
   const [noteAdd, setNoteAdd] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [menuFor, setMenuFor] = useState(null);      // قائمة الـ3 نقط
+  const [expanded, setExpanded] = useState([]);      // التاسكات الأب المفتوحة
+  const [quickSub, setQuickSub] = useState("");
+  const [savingQuick, setSavingQuick] = useState(false);
   const [blockOpen, setBlockOpen] = useState(null);
   const [blockForm, setBlockForm] = useState({ reason: "", waiting_on: "", blocked_by: "" });
   const [savingBlock, setSavingBlock] = useState(false);
@@ -283,6 +287,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     setFilterStatus(incomingFilter.status || "all");
     setFilterPriority(incomingFilter.priority || "all");
     setFilterOverdue(!!incomingFilter.overdue);
+    setFilterAssignee(incomingFilter.assignee || "all");
+    if (incomingFilter.overdue || incomingFilter.openTask) setDayView("all");
     setSearch("");
   }, [incomingFilter && incomingFilter._k]);
 
@@ -455,6 +461,61 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     await addHistory(task.id, "deliverable_added", user.name, deliverUrl || deliverNote);
     setShowDeliver(null); setDeliverUrl(""); setDeliverNote(""); await loadAll();
     openDetail({ ...task, deliverable_url: deliverUrl, deliverable_note: deliverNote });
+  }
+
+  // ═══ نسخ تاسك (Duplicate) ═══
+  function duplicateTask(t) {
+    setMenuFor(null);
+    setForm({
+      ...emptyForm,
+      title: t.title,
+      project_id: t.project_id || "",
+      assigned_to: t.assigned_to || user.name,
+      task_type: t.task_type || (taskTypes[0] && taskTypes[0].name) || "Other",
+      priority: t.priority || "medium",
+      difficulty: t.difficulty || "medium",
+      task_date: t.due_date ? String(t.due_date).slice(0, 10) : today,
+      due_date: t.due_date ? String(t.due_date).slice(0, 10) : today,
+      start_date: t.start_date ? String(t.start_date).slice(0, 10) : "",
+      notes: t.notes || "",
+      attachments: t.attachments || "",
+      helpers: parseHelpers(t.helpers),
+      month: t.month || CURRENT_MONTH,
+    });
+    setShowAdd(true);
+  }
+
+  // ═══ إضافة سب تاسك سريعة ═══
+  async function addQuickSub() {
+    const title = quickSub.trim();
+    if (!title || !showDetail) return;
+    setSavingQuick(true);
+    const parent = showDetail;
+
+    if (!parent.is_parent) {
+      await sb(`tasks?id=eq.${parent.id}`, "PATCH", { is_parent: true });
+      await clearTaskPoints(parent);
+      await addHistory(parent.id, "became_parent", user.name, "اتحولت لتاسك أب");
+    }
+
+    await sb("tasks", "POST", {
+      title,
+      project_id: parent.project_id || null,
+      assigned_to: parent.assigned_to,
+      task_type: parent.task_type,
+      priority: parent.priority || "medium",
+      difficulty: parent.difficulty || "medium",
+      status: "todo",
+      month: parent.month || CURRENT_MONTH,
+      task_date: today,
+      due_date: today,          // تاريخ إنشاء السب تاسك مش تاريخ الأب
+      created_by: user.name,
+      parent_task_id: String(parent.id),
+    });
+
+    setSavingQuick(false);
+    setQuickSub("");
+    await loadAll();
   }
 
   // ═══ المهام الفرعية (بند ١١) ═══
@@ -1095,7 +1156,9 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     if (t.status === "todo") return 2;
     return 3;
   }
-  const filtered = baseFiltered.filter(inDayView)
+  const filtered = baseFiltered
+    .filter(t => !t.parent_task_id || t.is_help_task)   // السب تاسكس بتظهر تحت الأب بالتوسيع
+    .filter(inDayView)
     .map((t, i) => ({ t, i }))
     .sort((a, b) => (sortRank(a.t) - sortRank(b.t)) || (a.i - b.i))
     .map(x => x.t);
@@ -1367,8 +1430,29 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                 const proj = projects.find(x => x.id === task.project_id);
                 const isOverdue = task.due_date && task.due_date.slice(0,10) < today && task.status !== "completed" && task.status !== "cancelled";
                 const attachCount = parseAttachments(task.attachments).length;
+                const subs = subsOf(task.id);
+                const subsDone = subs.filter(x => x.status === "completed").length;
+                const isOpen = expanded.includes(String(task.id));
                 return (
-                  <div key={task.id} onClick={() => openDetail(task)} style={{ background: "#FFFFFF", border: `1px solid ${isOverdue ? "#FECACA" : "#E2E8F0"}`, borderRadius: 14, padding: "14px 16px", cursor: "pointer", borderRight: `4px solid ${s.color}`, boxShadow: "0 1px 3px rgba(15,23,42,0.06)" }}>
+                  <div key={task.id}>
+                  <div onClick={() => openDetail(task)} style={{ background: "#FFFFFF", border: `1px solid ${isOverdue ? "#FECACA" : "#E2E8F0"}`, borderRadius: 14, padding: "14px 16px", cursor: "pointer", borderRight: `4px solid ${s.color}`, boxShadow: "0 1px 3px rgba(15,23,42,0.06)", position: "relative" }}>
+
+                    {/* قائمة الـ3 نقط */}
+                    <button onClick={e => { e.stopPropagation(); setMenuFor(menuFor === task.id ? null : task.id); }}
+                      style={{ position: "absolute", left: 8, top: 10, background: "none", color: "#94A3B8", fontSize: 16, padding: "2px 6px", lineHeight: 1 }}>⋯</button>
+                    {menuFor === task.id && (
+                      <div onClick={e => e.stopPropagation()}
+                        style={{ position: "absolute", left: 8, top: 34, zIndex: 40, background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 12, boxShadow: "0 6px 20px rgba(15,23,42,0.14)", overflow: "hidden", minWidth: 150 }}>
+                        <button onClick={() => duplicateTask(task)}
+                          style={{ width: "100%", textAlign: "right", background: "none", border: "none", padding: "9px 14px", fontSize: 13, color: "#0F172A" }}>
+                          📄 نسخ التاسك
+                        </button>
+                        <button onClick={() => { setMenuFor(null); openDetail(task); }}
+                          style={{ width: "100%", textAlign: "right", background: "none", border: "none", borderTop: "1px solid #F1F5F9", padding: "9px 14px", fontSize: 13, color: "#0F172A" }}>
+                          ✏️ فتح وتعديل
+                        </button>
+                      </div>
+                    )}
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                       <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>{s.icon}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1378,13 +1462,11 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                           <span style={{ fontSize: 11, color: p.color, fontWeight: 600 }}>{p.icon} {p.label}</span>
                           {proj && <span style={{ fontSize: 11, color: "#64748B" }}>📁 {proj.name}</span>}
                           <span style={{ fontSize: 11, color: "#64748B" }}>👤 {task.assigned_to}</span>
-                          {task.is_parent && (() => {
-                            const subs = subsOf(task.id);
-                            const d = subs.filter(x => x.status === "completed").length;
-                            return <span style={{ fontSize: 11, background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>📑 {d}/{subs.length}</span>;
-                          })()}
-                          {task.parent_task_id && !task.is_help_task && (
-                            <span title="بند في تاسك أكبر" style={{ fontSize: 11, color: "#64748B" }}>📑</span>
+                          {subs.length > 0 && (
+                            <button onClick={e => { e.stopPropagation(); setExpanded(v => isOpen ? v.filter(x => x !== String(task.id)) : [...v, String(task.id)]); }}
+                              style={{ fontSize: 11, background: isOpen ? "#2563EB" : "#EFF6FF", color: isOpen ? "#fff" : "#2563EB", border: "1px solid #BFDBFE", padding: "2px 9px", borderRadius: 6, fontWeight: 700 }}>
+                              📑 {subsDone} من {subs.length} {isOpen ? "▲" : "▼"}
+                            </button>
                           )}
                           {task.content_status && (
                             <span style={{ fontSize: 11, background: "#ECFEFF", color: "#0891B2", border: "1px solid #A5F3FC", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
@@ -1418,6 +1500,26 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                       </div>
                     </div>
                   </div>
+
+                  {/* صفوف السب تاسكس بالتوسيع */}
+                  {isOpen && subs.length > 0 && (
+                    <div style={{ marginRight: 22, marginTop: 5, display: "flex", flexDirection: "column", gap: 5, borderRight: "2px dashed #CBD5E1", paddingRight: 10 }}>
+                      {subs.map(x => {
+                        const xs = STATUS_CONFIG[x.status] || STATUS_CONFIG.todo;
+                        return (
+                          <div key={x.id} onClick={() => openDetail(x)}
+                            style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, borderRight: `3px solid ${xs.color}` }}>
+                            <span style={{ fontSize: 13 }}>{xs.icon}</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: x.status === "completed" ? "line-through" : "none" }}>{x.title}</span>
+                            {x.due_date && <span style={{ fontSize: 10, color: "#94A3B8" }}>{formatDate(String(x.due_date).slice(0,10))}</span>}
+                            <span style={{ fontSize: 11, color: "#94A3B8" }}>{x.assigned_to}</span>
+                            <span style={{ fontSize: 11, color: "#2563EB" }}>✏️</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  </div>
                 );
               })}
             </div>
@@ -1443,7 +1545,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                 </div>
                 <div>
                   <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>
-                    اليوم {form.task_date && <span style={{ color: "#2563EB", fontSize: 11 }}>— {getDayName(form.task_date)}</span>}
+                    تاريخ التسليم {form.task_date && <span style={{ color: "#2563EB", fontSize: 11 }}>— {getDayName(form.task_date)}</span>}
                   </div>
                   <input type="date" value={form.task_date} onChange={e => setForm(f => ({ ...f, task_date: e.target.value, due_date: e.target.value }))} style={inp} />
                 </div>
@@ -1786,6 +1888,23 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                             <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4, lineHeight: 1.6 }}>
                               الأب غلاف بس — النقاط والضغط على البنود · وبيتقفل لوحده لما كلها تخلص
                             </div>
+                          </>
+                        )}
+                        {canEdit && showDetail.status !== "completed" && !showDetail.parent_task_id && (
+                          <>
+                          <div style={{ display: "flex", gap: 8, marginTop: subs.length ? 8 : 0 }}>
+                            <input value={quickSub} onChange={e => setQuickSub(e.target.value)}
+                              onKeyDown={e => e.key === "Enter" && addQuickSub()}
+                              placeholder="＋ سب تاسك سريعة — الاسم بس"
+                              style={{ ...inp, flex: 1, padding: "8px 12px", fontSize: 13 }} />
+                            <button onClick={addQuickSub} disabled={savingQuick || !quickSub.trim()}
+                              style={{ background: (savingQuick || !quickSub.trim()) ? "#CBD5E1" : "#2563EB", color: "#fff", padding: "8px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>
+                              إضافة
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 10, color: "#94A3B8", margin: "5px 0 8px", lineHeight: 1.6 }}>
+                            المشروع والمسؤول والنوع والأولوية بتتاخد من التاسك الأم · وتاريخ التسليم = النهاردة
+                          </div>
                           </>
                         )}
                         {canEdit && showDetail.status !== "completed" && !showDetail.parent_task_id && (
