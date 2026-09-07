@@ -22,16 +22,29 @@ export function fmtClock(secs) {
   return h ? `${p(h)}:${p(m)}:${p(x)}` : `${p(m)}:${p(x)}`;
 }
 
-// ── الجلسة الشغالة حالياً لعضو ──
+// ── كل الجلسات الشغالة لعضو (تايمرات متوازية مسموحة) ──
+export async function activeTimers(name) {
+  const rows = await sb(`task_timers?member_name=eq.${encodeURIComponent(name)}&ended_at=is.null&order=started_at.desc`);
+  return rows || [];
+}
+
+// أحدث جلسة شغالة — للتوافق مع الكود القديم
 export async function activeTimer(name) {
-  const rows = await sb(`task_timers?member_name=eq.${encodeURIComponent(name)}&ended_at=is.null&order=started_at.desc&limit=1`);
+  const rows = await activeTimers(name);
+  return rows[0] || null;
+}
+
+// الجلسة الشغالة على تاسك بعينها
+export async function activeTimerFor(name, taskId) {
+  const rows = await sb(`task_timers?member_name=eq.${encodeURIComponent(name)}&task_id=eq.${encodeURIComponent(String(taskId))}&ended_at=is.null&limit=1`);
   return rows && rows[0] ? rows[0] : null;
 }
 
 // ── تشغيل التايمر على تاسك ──
 export async function startTimer(task, name, projectName) {
-  // اقفل أي جلسة شغالة الأول — مينفعش تايمرين مع بعض
-  await stopTimer(name);
+  // التايمرات المتوازية مسموحة — مفيش إيقاف تلقائي لأي جلسة تانية
+  const already = await activeTimerFor(name, task.id);
+  if (already) return already;
   const rows = await sb("task_timers", "POST", {
     task_id: String(task.id),
     task_title: task.title,
@@ -43,9 +56,9 @@ export async function startTimer(task, name, projectName) {
   return rows && rows[0] ? rows[0] : null;
 }
 
-// ── إيقاف التايمر وحساب المدة ──
-export async function stopTimer(name) {
-  const open = await activeTimer(name);
+// ── إيقاف التايمر وحساب المدة · لو اتحدد taskId بيوقف بتاعها هي ──
+export async function stopTimer(name, taskId) {
+  const open = taskId ? await activeTimerFor(name, taskId) : await activeTimer(name);
   if (!open) return null;
   const now = new Date();
   const mins = Math.max(0, Math.round((now - new Date(open.started_at)) / 60000));
@@ -61,6 +74,13 @@ export async function stopTimer(name) {
 }
 
 // ── هل التاسك دي عليها وقت مسجّل؟ ──
+// إيقاف كل الجلسات الشغالة لعضو (عند إنهاء يوم العمل مثلاً)
+export async function stopAllTimers(name) {
+  const rows = await activeTimers(name);
+  for (const r of rows) await stopTimer(name, r.task_id);
+  return rows.length;
+}
+
 export async function taskHasTime(taskId) {
   const rows = await sb(`task_timers?task_id=eq.${encodeURIComponent(String(taskId))}&select=duration_minutes`);
   return (rows || []).some(r => Number(r.duration_minutes) > 0);
