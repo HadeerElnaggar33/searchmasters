@@ -14,7 +14,7 @@ const TABS = [
   ["content",   "💬 الرسائل والمحتوى"],
   ["stickers",  "🖼 الاستيكرات"],
   ["team",      "👥 الفريق والصلاحيات"],
-  ["types",     "🏷 أنواع التاسكات"],
+  ["types",     "🏷 الأنواع والحالات"],
   ["recurring", "🔄 التاسكات المتكررة"],
   ["features",  "🎛 تفعيل الميزات"],
   ["log",       "📜 سجل التغييرات"],
@@ -117,6 +117,8 @@ export default function Settings({ user }) {
   const [types, setTypes] = useState([]);
   const [newType, setNewType] = useState({ name: "", group_name: "Content" });
   const [editType, setEditType] = useState(null);
+  const [newCS, setNewCS] = useState("");
+  const [editCS, setEditCS] = useState(null);   // { i, value }
   const [stForm, setStForm] = useState({ name: "", category: "مود", places: ["mood"], situation: "none", rate: "normal", start_date: "", end_date: "" });
   const [stFile, setStFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -354,6 +356,44 @@ export default function Settings({ user }) {
     await sb(`stickers?id=eq.${x.id}`, "DELETE");
     await writeLog("حذف استيكر", x.name, "");
     await load();
+  }
+
+  // ── حالات المحتوى — مخزنة كنص مفصول بفاصلة ──
+  function csList() {
+    const v = settings.content_statuses || "";
+    return String(v).split(",").map(x => x.trim()).filter(Boolean);
+  }
+  async function saveCS(list) {
+    await saveSetting("content_statuses", list.join(","), "حالات المحتوى");
+  }
+  async function addCS() {
+    const v = newCS.trim();
+    if (!v) return;
+    const list = csList();
+    if (list.includes(v)) { alert("الحالة دي موجودة خلاص"); return; }
+    await saveCS([...list, v]);
+    setNewCS("");
+  }
+  async function saveCSEdit() {
+    const v = (editCS.value || "").trim();
+    if (!v) return;
+    const list = csList();
+    list[editCS.i] = v;
+    await saveCS(list);
+    setEditCS(null);
+  }
+  async function delCS(i) {
+    const list = csList();
+    const removed = list[i];
+    await saveCS(list.filter((_, j) => j !== i));
+    await writeLog("حذف حالة محتوى", removed, "");
+  }
+  async function moveCS(i, dir) {
+    const list = csList();
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+    await saveCS(list);
   }
 
   async function addType() {
@@ -817,6 +857,33 @@ export default function Settings({ user }) {
       {tab === "types" && (
         <>
           <div style={card}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>📄 حالات المحتوى</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 12, lineHeight: 1.7 }}>
+              بتظهر في تفاصيل التاسك كأزرار · مستقلة تماماً عن حالة التاسك · الترتيب هنا هو ترتيب ظهورها
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <input value={newCS} onChange={e => setNewCS(e.target.value)} placeholder="مثال: Under Client Review"
+                style={{ ...inp, flex: 1, minWidth: 170 }} />
+              <button onClick={addCS} style={{ background: "linear-gradient(135deg,#0891B2,#0E7490)", color: "#fff", padding: "9px 18px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>+ إضافة</button>
+            </div>
+
+            {csList().length === 0
+              ? <div style={{ textAlign: "center", color: "#94A3B8", fontSize: 13, padding: 14 }}>مفيش حالات — التاسكات مش هتعرض خانة حالة المحتوى</div>
+              : csList().map((cs, i) => (
+                <div key={cs + i} style={{ background: "#ECFEFF", border: "1px solid #A5F3FC", borderRadius: 10, padding: "8px 12px", marginBottom: 5, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "#94A3B8", minWidth: 16 }}>{i + 1}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#0F172A", fontWeight: 600 }}>{cs}</span>
+                  <button onClick={() => moveCS(i, -1)} disabled={i === 0} style={{ background: "none", color: i === 0 ? "#E2E8F0" : "#64748B", fontSize: 13 }}>▲</button>
+                  <button onClick={() => moveCS(i, 1)} disabled={i === csList().length - 1} style={{ background: "none", color: i === csList().length - 1 ? "#E2E8F0" : "#64748B", fontSize: 13 }}>▼</button>
+                  <button onClick={() => setEditCS({ i, value: cs })} style={{ background: "none", color: "#2563EB", fontSize: 12 }}>✏️</button>
+                  <button onClick={() => delCS(i)} style={{ background: "none", color: "#DC2626", fontSize: 13 }}>🗑</button>
+                </div>
+              ))
+            }
+          </div>
+
+          <div style={card}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>🏷 إضافة نوع</div>
             <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 12 }}>
               الاسم بالإنجليزي · الصيغة: المجموعة ثم شرطة عادية بمسافة قبلها وبعدها ثم التفصيل
@@ -925,6 +992,24 @@ export default function Settings({ user }) {
               </div>
             ))
           }
+        </div>
+      )}
+
+      {/* ═══ تعديل حالة محتوى ═══ */}
+      {editCS && (
+        <div onClick={e => e.target === e.currentTarget && setEditCS(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 380 }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 800, color: "#0F172A" }}>✏️ تعديل حالة المحتوى</h3>
+            <div style={{ fontSize: 11, color: "#D97706", marginBottom: 12, lineHeight: 1.7 }}>
+              ⚠️ التاسكات المسجّلة بالاسم القديم هتفضل عليه — غيّريها منها لو محتاجة
+            </div>
+            <input value={editCS.value} onChange={e => setEditCS(f => ({ ...f, value: e.target.value }))} style={{ ...inp, marginBottom: 14 }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveCSEdit} style={{ flex: 1, background: "linear-gradient(135deg,#0891B2,#0E7490)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>حفظ ✓</button>
+              <button onClick={() => setEditCS(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
         </div>
       )}
 
