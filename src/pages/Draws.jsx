@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { sb, sbUpload, formatDate, addNotification } from "../supabase.js";
-import { parseOpts, isLive, liveDrawFor, giftStats, submitAnswer, expireDraws } from "../draws.js";
+import { parseOpts, isLive, liveDrawFor, giftStats, submitAnswer, expireDraws, DRAW_TYPES, CRITERIA, computeWinners, rankIn } from "../draws.js";
 import { GIFT_TYPES, DELIVERY_STATUS, RECEIVE_MODES, REACTIONS, reactionLabel, myGiftSummary, matchMembers, groupSuggestions, toggleReaction } from "../gifts.js";
 import { SB_URL, SB_KEY } from "../supabase.js";
 import { uploadSticker } from "../stickers.js";
@@ -18,12 +18,19 @@ export function DrawPopup({ user }) {
     let alive = true;
     async function check() {
       try {
+        // المدير مستثنى من نافذة السحب
+        if (user.role === "admin" || user.role === "team_leader") { setDraw(null); return; }
         await expireDraws();
-        const [ds, at] = await Promise.all([
-          sb("draws?status=eq.open&order=created_at.desc"),
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const [ds, at, att] = await Promise.all([
+          sb("draws?status=eq.open&draw_type=eq.questions&order=created_at.desc"),
           sb(`draw_attempts?member_name=eq.${encodeURIComponent(user.name)}&select=draw_id,member_name`),
+          sb(`attendance?member_name=eq.${encodeURIComponent(user.name)}&date=eq.${todayStr}&select=id,status`),
         ]);
         if (!alive) return;
+        // اللي مسجّلش حضور النهاردة مبتظهرلوش ومبيدخلش السحب
+        const present = (att || []).some(a => a.status !== "leave");
+        if (!present) { setDraw(null); return; }
         const live = liveDrawFor(ds || [], at || [], user.name);
         if (live && (!draw || draw.id !== live.id)) { setDraw(live); setResult(null); setChoice(""); }
         if (!live && draw && !result) setDraw(null);
@@ -90,8 +97,8 @@ export function DrawPopup({ user }) {
               {result === "won" ? "كسبت!" : result === "wrong" ? "إجابة غلط" : "السحب اتقفل"}
             </div>
             <div style={{ fontSize: 13, color: "#64748B", lineHeight: 1.8, marginBottom: 18 }}>
-              {result === "won" && <>إجابتك: <b style={{ color: "#059669" }}>{choice}</b><br />✅ <b>{draw.gift_name}</b> اتضافت لرصيدك</>}
-              {result === "wrong" && <>إجابتك: <b style={{ color: "#DC2626" }}>{choice}</b><br />السحب لسه مفتوح لحد تاني · حظ أوفر المرة الجاية</>}
+              {result === "won" && <>مبروك، كسبت <b>{draw.gift_name}</b> 🎉<br />يلا جمّع رصيدك وجوايزك</>}
+              {result === "wrong" && <>مش دي الإجابة، ركز المرة الجاية<br /><span style={{ fontSize: 11, color: "#94A3B8" }}>مفيش محاولة تانية في السحب ده</span></>}
               {result === "closed" && <>حد سبقك بثواني، أو المدة خلصت</>}
             </div>
             <button onClick={() => { setDraw(null); setResult(null); }}
@@ -130,9 +137,14 @@ export default function Draws({ user }) {
 
   const [giftForm, setGiftForm] = useState({ name: "", description: "" });
   const [giftFile, setGiftFile] = useState(null);
-  const [qForm, setQForm] = useState({ text: "", options: "", correct: "" });
+  const [qForm, setQForm] = useState({ text: "", opts: ["", "", "", ""], correct: "", q_type: "mcq", msg_correct: "", msg_wrong: "" });
   const [newDraw, setNewDraw] = useState(null);
-  const [drawForm, setDrawForm] = useState({ gift_id: "", question_id: "", mode: "until", minutes: "30" });
+  const [drawForm, setDrawForm] = useState({
+    gift_id: "", question_ids: [], mode: "until", minutes: "30",
+    draw_type: "questions", criterion: "points", days_back: 7,
+    period_from: "", period_to: "", announce: true, steer_to: "",
+  });
+  const [ctxData, setCtxData] = useState({ ledger: [], attendance: [], tasks: [] });
 
   const isAdmin = user.role === "admin" || user.role === "team_leader";
   function isAdminNow() { return user.role === "admin" || user.role === "team_leader"; }
@@ -146,7 +158,7 @@ export default function Draws({ user }) {
   async function loadAll() {
     setLoading(true);
     await expireDraws();
-    const [g, q, d, a, m, p, rx, dl, sg, pf] = await Promise.all([
+    const [g, q, d, a, m, p, rx, dl, sg, pf, lg2, att2, tk2] = await Promise.all([
       sb("gifts?is_active=eq.true&order=created_at.desc"),
       sb("draw_questions?is_active=eq.true&order=created_at.desc"),
       sb("draws?order=created_at.desc"),
@@ -157,6 +169,9 @@ export default function Draws({ user }) {
       sb("gift_deliveries?order=created_at.desc"),
       sb("gift_suggestions?order=created_at.desc"),
       isAdminNow() ? sb("member_profiles?select=member_name,gift_wishes,gift_avoid,likes") : Promise.resolve([]),
+      sb("score_ledger?select=member_name,points,created_at"),
+      sb("attendance?select=member_name,date,working_minutes,status"),
+      sb("tasks?select=assigned_to,status,completed_at,due_date"),
     ]);
     if (g) setGifts(g);
     if (q) setQuestions(q);
@@ -168,6 +183,7 @@ export default function Draws({ user }) {
     if (dl) setDeliveries(dl);
     if (sg) setSuggestions(sg);
     if (pf) setProfiles(pf);
+    setCtxData({ ledger: lg2 || [], attendance: att2 || [], tasks: tk2 || [] });
     setLoading(false);
   }
 
@@ -240,33 +256,122 @@ export default function Draws({ user }) {
   }
 
   async function addQuestion() {
-    const opts = parseOpts(qForm.options);
+    const opts = (qForm.opts || []).map(x => String(x).trim()).filter(Boolean);
     if (!qForm.text.trim()) { alert("اكتبي السؤال"); return; }
-    if (opts.length < 2) { alert("محتاجه اختيارين على الأقل"); return; }
-    if (!opts.includes(qForm.correct.trim())) { alert("الإجابة الصح لازم تكون واحدة من الاختيارات بالظبط"); return; }
-    await sb("draw_questions", "POST", { text: qForm.text.trim(), options: opts.join(", "), correct: qForm.correct.trim(), created_by: user.name });
-    setQForm({ text: "", options: "", correct: "" });
+    if (opts.length < 2) { alert("محتاجه إجابتين على الأقل"); return; }
+    if (!qForm.correct || !opts.includes(String(qForm.correct).trim())) {
+      alert("لازم تحددي الإجابة الصح بالضغط على الدايرة جنبها");
+      return;
+    }
+    await sb("draw_questions", "POST", {
+      text: qForm.text.trim(),
+      options: opts.join(", "),
+      correct: String(qForm.correct).trim(),
+      q_type: qForm.q_type || "mcq",
+      msg_correct: qForm.msg_correct || null,
+      msg_wrong: qForm.msg_wrong || null,
+      created_by: user.name,
+    });
+    setQForm({ text: "", opts: ["", "", "", ""], correct: "", q_type: "mcq", msg_correct: "", msg_wrong: "" });
     await loadAll();
   }
 
+  function periodRange() {
+    const f = drawForm;
+    if (f.draw_type === "weekly") {
+      const d = new Date(); d.setDate(d.getDate() - d.getDay());
+      return { from: d.toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) };
+    }
+    if (f.draw_type === "pressure") {
+      const d = new Date(); d.setDate(d.getDate() - 2);
+      return { from: d.toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) };
+    }
+    if (f.period_from && f.period_to) return { from: f.period_from, to: f.period_to };
+    const d = new Date(); d.setDate(d.getDate() - (Number(f.days_back) || 1) + 1);
+    return { from: d.toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) };
+  }
+
   async function startDraw() {
-    const g = gifts.find(x => String(x.id) === String(drawForm.gift_id));
-    const q = questions.find(x => String(x.id) === String(drawForm.question_id));
+    const f = drawForm;
+    const g = gifts.find(x => String(x.id) === String(f.gift_id));
     if (!g) { alert("اختاري الهدية"); return; }
-    if (!q) { alert("اختاري السؤال"); return; }
+
     setSaving(true);
-    const closes = drawForm.mode === "timed"
-      ? new Date(Date.now() + Math.max(1, Number(drawForm.minutes) || 30) * 60000).toISOString()
+    const closes = f.mode === "timed"
+      ? new Date(Date.now() + Math.max(1, Number(f.minutes) || 30) * 60000).toISOString()
       : null;
-    await sb("draws", "POST", {
+    const base = {
       gift_id: String(g.id), gift_name: g.name, gift_image: g.image_url,
-      question_text: q.text, options: q.options, correct: q.correct,
-      status: "open", opens_at: new Date().toISOString(), closes_at: closes,
-      created_by: user.name,
+      draw_type: f.draw_type, announced: !!f.announce,
+      opens_at: new Date().toISOString(), created_by: user.name,
+    };
+
+    // ── سحب الأسئلة ──
+    if (f.draw_type === "questions") {
+      const picked = questions.filter(q => f.question_ids.includes(String(q.id)));
+      if (picked.length === 0) { setSaving(false); alert("اختاري سؤال واحد على الأقل"); return; }
+      const first = picked[0];
+      await sb("draws", "POST", {
+        ...base,
+        question_text: first.text, options: first.options, correct: first.correct,
+        question_ids: picked.map(q => String(q.id)).join(","),
+        steer_to: f.steer_to || null,
+        status: "open", closes_at: closes,
+      });
+      if (f.announce) {
+        for (const m of members) {
+          if (m.role === "admin") continue;
+          await addNotification(m.name, `🎲 النهاردة فيه سحب · ${picked.length} أسئلة وأول واحد يجاوبهم صح بياخد ${g.name}`, "info");
+        }
+      }
+      setSaving(false); setNewDraw(null); await loadAll();
+      return;
+    }
+
+    // ── الأنواع المحسوبة: التقييم · الأداء · الضغط ──
+    const range = periodRange();
+    const { winners, scores, top } = computeWinners(f.criterion, {
+      members, ledger: ctxData.ledger, attendance: ctxData.attendance, tasks: ctxData.tasks,
+      from: range.from, to: range.to,
     });
-    setSaving(false); setNewDraw(null);
-    setDrawForm({ gift_id: "", question_id: "", mode: "until", minutes: "30" });
-    await loadAll();
+
+    if (winners.length === 0) {
+      setSaving(false);
+      alert("مفيش حد حقق أي نتيجة في المعيار ده خلال الفترة — جربي معيار أو فترة تانية");
+      return;
+    }
+
+    const critLabel = (CRITERIA[f.criterion] || {}).l || f.criterion;
+    await sb("draws", "POST", {
+      ...base,
+      criterion: f.criterion, period_from: range.from, period_to: range.to,
+      question_text: `${DRAW_TYPES[f.draw_type].l} — ${critLabel}`,
+      options: "", correct: "",
+      status: "won",
+      winner_name: winners[0],
+      winners_all: winners.join(", "),
+      won_at: new Date().toISOString(),
+      closes_at: new Date().toISOString(),
+    });
+
+    for (const w of winners) {
+      await sb("gift_deliveries", "POST", {
+        gift_id: String(g.id), gift_name: g.name, member_name: w, status: "preparing",
+      });
+    }
+
+    for (const m of members) {
+      if (m.role === "admin") continue;
+      const r = rankIn(scores, m.name);
+      const won = winners.includes(m.name);
+      await addNotification(m.name,
+        won
+          ? `🏆 كسبت «${g.name}» — ${critLabel}${winners.length > 1 ? ` (تعادل مع ${winners.length - 1})` : ""}`
+          : `🎲 سحب ${critLabel} خلص · الفايز ${winners.join("، ")} · ترتيبك ${r.rank} من ${r.of} · شد حيلك المرة الجاية`,
+        "info");
+    }
+
+    setSaving(false); setNewDraw(null); await loadAll();
   }
 
   async function cancelDraw(d) {
@@ -519,15 +624,74 @@ export default function Draws({ user }) {
 
           <div style={card}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 12 }}>❓ مكتبة الأسئلة ({questions.length})</div>
-            <input value={qForm.text} onChange={e => setQForm(f => ({ ...f, text: e.target.value }))} placeholder="نص السؤال" style={{ ...inp, marginBottom: 8 }} />
-            <input value={qForm.options} onChange={e => setQForm(f => ({ ...f, options: e.target.value }))} placeholder="الاختيارات مفصولة بفاصلة" style={{ ...inp, marginBottom: 8 }} />
-            <input value={qForm.correct} onChange={e => setQForm(f => ({ ...f, correct: e.target.value }))} placeholder="الإجابة الصح (زي ما هي في الاختيارات)" style={{ ...inp, marginBottom: 10 }} />
-            <button onClick={addQuestion} style={{ background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: "8px 18px", borderRadius: 10, fontSize: 13, fontWeight: 700, marginBottom: 14 }}>+ إضافة سؤال</button>
+
+            <div style={label}>نص السؤال *</div>
+            <input value={qForm.text} onChange={e => setQForm(f => ({ ...f, text: e.target.value }))} style={{ ...inp, marginBottom: 10 }} />
+
+            <div style={label}>نوع السؤال</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              {[["mcq", "اختيار من متعدد"], ["tf", "صح وغلط"]].map(([v, l]) => {
+                const on = (qForm.q_type || "mcq") === v;
+                return (
+                  <button key={v} onClick={() => setQForm(f => ({
+                    ...f, q_type: v,
+                    opts: v === "tf" ? ["صح", "غلط"] : (f.opts && f.opts.length === 4 ? f.opts : ["", "", "", ""]),
+                    correct: "",
+                  }))}
+                    style={{ flex: 1, padding: "9px 6px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#EFF6FF" : "#F8FAFC", color: on ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: 600 }}>{l}</button>
+                );
+              })}
+            </div>
+
+            <div style={label}>الإجابات — <span style={{ color: "#059669", fontWeight: 700 }}>دوسي على الصح</span> *</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+              {(qForm.opts || ["", "", "", ""]).map((o, i) => {
+                const isCorrect = qForm.correct && qForm.correct === o && o !== "";
+                return (
+                  <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <button onClick={() => o.trim() && setQForm(f => ({ ...f, correct: o }))}
+                      title="دي الإجابة الصح"
+                      style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, border: `2px solid ${isCorrect ? "#059669" : "#E2E8F0"}`, background: isCorrect ? "#ECFDF5" : "#F8FAFC", color: isCorrect ? "#059669" : "#CBD5E1", fontSize: 15, fontWeight: 800 }}>
+                      {isCorrect ? "✓" : "○"}
+                    </button>
+                    <input value={o} readOnly={(qForm.q_type || "mcq") === "tf"}
+                      onChange={e => setQForm(f => {
+                        const a = [...(f.opts || ["", "", "", ""])];
+                        const oldVal = a[i];
+                        a[i] = e.target.value;
+                        return { ...f, opts: a, correct: f.correct === oldVal ? e.target.value : f.correct };
+                      })}
+                      placeholder={`الإجابة ${i + 1}`}
+                      style={{ ...inp, background: isCorrect ? "#ECFDF5" : "#F8FAFC", border: `1.5px solid ${isCorrect ? "#A7F3D0" : "#E2E8F0"}` }} />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={label}>رسالة عند الإجابة الصح <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
+            <input value={qForm.msg_correct || ""} onChange={e => setQForm(f => ({ ...f, msg_correct: e.target.value }))} placeholder="برافو! 🎉" style={{ ...inp, marginBottom: 8 }} />
+
+            <div style={label}>رسالة عند الإجابة الغلط <span style={{ color: "#94A3B8", fontWeight: 400 }}>— اختياري</span></div>
+            <input value={qForm.msg_wrong || ""} onChange={e => setQForm(f => ({ ...f, msg_wrong: e.target.value }))} placeholder="مش دي الإجابة، ركز المرة الجاية" style={{ ...inp, marginBottom: 10 }} />
+
+            {!qForm.correct && (
+              <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#DC2626", marginBottom: 10 }}>
+                ⚠️ لازم تحددي الإجابة الصح بالضغط على الدايرة جنبها — السؤال مش هيتحفظ من غيرها
+              </div>
+            )}
+
+            <button onClick={addQuestion} disabled={!qForm.correct}
+              style={{ background: qForm.correct ? "linear-gradient(135deg,#2563EB,#7C3AED)" : "#CBD5E1", color: "#fff", padding: "9px 20px", borderRadius: 10, fontSize: 13, fontWeight: 700, marginBottom: 14 }}>
+              حفظ السؤال ✓
+            </button>
+
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {questions.map(q => (
                 <div key={q.id} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 12px" }}>
                   <div style={{ fontSize: 13, color: "#0F172A" }}>{q.text}</div>
-                  <div style={{ fontSize: 11, color: "#94A3B8" }}>{q.options} · الصح: <b style={{ color: "#059669" }}>{q.correct}</b></div>
+                  <div style={{ fontSize: 11, color: "#94A3B8" }}>
+                    {q.q_type === "tf" ? "صح وغلط" : "اختيار من متعدد"} · {q.options} · الصح: <b style={{ color: "#059669" }}>{q.correct}</b>
+                  </div>
                 </div>
               ))}
             </div>
@@ -654,47 +818,135 @@ export default function Draws({ user }) {
       )}
 
       {/* ═══ بدء سحب ═══ */}
-      {newDraw && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={e => e.target === e.currentTarget && setNewDraw(null)}>
-          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 440, boxShadow: "0 8px 32px rgba(15,23,42,0.12)" }}>
-            <h3 style={{ margin: "0 0 16px", fontSize: 17, fontWeight: 800, color: "#0F172A" }}>🎲 سحب جديد</h3>
+      {newDraw && (() => {
+        const f = drawForm;
+        const isQ = f.draw_type === "questions";
+        const crits = Object.keys(CRITERIA).filter(k => CRITERIA[k].for.includes(f.draw_type));
+        const range = periodRange();
+        const preview = !isQ ? computeWinners(f.criterion, {
+          members, ledger: ctxData.ledger, attendance: ctxData.attendance, tasks: ctxData.tasks,
+          from: range.from, to: range.to,
+        }) : null;
 
-            <div style={label}>الهدية *</div>
-            <select value={drawForm.gift_id} onChange={e => setDrawForm(f => ({ ...f, gift_id: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
-              <option value="">— اختاري —</option>
-              {gifts.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
+        return (
+          <div onClick={e => e.target === e.currentTarget && setNewDraw(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 470, maxHeight: "92vh", overflowY: "auto" }}>
+              <h3 style={{ margin: "0 0 16px", fontSize: 17, fontWeight: 800, color: "#0F172A" }}>🎲 سحب جديد</h3>
 
-            <div style={label}>السؤال *</div>
-            <select value={drawForm.question_id} onChange={e => setDrawForm(f => ({ ...f, question_id: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
-              <option value="">— اختاري —</option>
-              {questions.map(q => <option key={q.id} value={q.id}>{q.text}</option>)}
-            </select>
+              <div style={label}>نوع السحب *</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+                {Object.keys(DRAW_TYPES).map(k => {
+                  const on = f.draw_type === k;
+                  const t = DRAW_TYPES[k];
+                  return (
+                    <button key={k} onClick={() => setDrawForm(x => ({ ...x, draw_type: k, criterion: k === "pressure" ? "open_tasks" : "points" }))}
+                      style={{ textAlign: "right", padding: "10px 13px", borderRadius: 12, border: `2px solid ${on ? "#D97706" : "#E2E8F0"}`, background: on ? "#FFFBEB" : "#F8FAFC" }}>
+                      <div style={{ fontSize: 13, fontWeight: on ? 800 : 600, color: on ? "#D97706" : "#0F172A" }}>{t.icon} {t.l}</div>
+                      <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>{t.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
 
-            <div style={label}>مدة الظهور *</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              {[["until", "لحد ما حد يجاوب"], ["timed", "مدة محددة"]].map(([v, l]) => (
-                <button key={v} onClick={() => setDrawForm(f => ({ ...f, mode: v }))}
-                  style={{ flex: 1, padding: "10px 8px", borderRadius: 10, border: `2px solid ${drawForm.mode === v ? "#D97706" : "#E2E8F0"}`, background: drawForm.mode === v ? "#FFFBEB" : "#F8FAFC", color: drawForm.mode === v ? "#D97706" : "#64748B", fontSize: 13, fontWeight: 600 }}>{l}</button>
-              ))}
-            </div>
-            {drawForm.mode === "timed" && (
-              <input type="number" min="1" value={drawForm.minutes} onChange={e => setDrawForm(f => ({ ...f, minutes: e.target.value }))} placeholder="دقايق" style={{ ...inp, marginBottom: 10 }} />
-            )}
+              <div style={label}>الهدية *</div>
+              <select value={f.gift_id} onChange={e => setDrawForm(x => ({ ...x, gift_id: e.target.value }))} style={{ ...inp, marginBottom: 14 }}>
+                <option value="">— اختاري —</option>
+                {gifts.filter(g => !g.is_archived).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
 
-            <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#2563EB", marginBottom: 16, lineHeight: 1.7 }}>
-              💡 مفيش إشعارات — السحب هيظهر لوحده لأي حد فاتح الأداة. لو محدش جاوب خلال المدة، السحب يتلغي والهدية تروح.
-            </div>
+              {isQ ? (
+                <>
+                  <div style={label}>الأسئلة * <span style={{ color: "#94A3B8", fontWeight: 400 }}>— أول واحد يجاوبهم كلهم صح بيكسب</span></div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12, maxHeight: 180, overflowY: "auto" }}>
+                    {questions.map(q => {
+                      const on = f.question_ids.includes(String(q.id));
+                      return (
+                        <button key={q.id} onClick={() => setDrawForm(x => ({ ...x, question_ids: on ? x.question_ids.filter(i => i !== String(q.id)) : [...x.question_ids, String(q.id)] }))}
+                          style={{ textAlign: "right", padding: "8px 11px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#EFF6FF" : "#F8FAFC", fontSize: 12, color: "#0F172A" }}>
+                          {on ? "✓ " : ""}{q.text}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={startDraw} disabled={saving} style={{ flex: 1, background: saving ? "#94A3B8" : "linear-gradient(135deg,#D97706,#B45309)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
-                {saving ? "..." : "ابدأي دلوقتي 🎲"}
+                  <div style={label}>مدة الظهور</div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                    {[["until", "لحد ما حد يجاوب"], ["timed", "مدة محددة"]].map(([v, l]) => {
+                      const on = f.mode === v;
+                      return (
+                        <button key={v} onClick={() => setDrawForm(x => ({ ...x, mode: v }))}
+                          style={{ flex: 1, padding: "9px 6px", borderRadius: 10, border: `2px solid ${on ? "#D97706" : "#E2E8F0"}`, background: on ? "#FFFBEB" : "#F8FAFC", color: on ? "#D97706" : "#64748B", fontSize: 12, fontWeight: 600 }}>{l}</button>
+                      );
+                    })}
+                  </div>
+                  {f.mode === "timed" && (
+                    <input type="number" min="1" value={f.minutes} onChange={e => setDrawForm(x => ({ ...x, minutes: e.target.value }))} placeholder="دقايق" style={{ ...inp, marginBottom: 12 }} />
+                  )}
+
+                  {/* توجيه الفوز — للمدير وحده (تعديل ٤٥) */}
+                  <div style={{ background: "#F8FAFC", border: "1px dashed #CBD5E1", borderRadius: 10, padding: "9px 12px", marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: "#64748B", fontWeight: 700, marginBottom: 5 }}>توجيه الفوز</div>
+                    <select value={f.steer_to} onChange={e => setDrawForm(x => ({ ...x, steer_to: e.target.value }))} style={{ ...inp, fontSize: 12, padding: "7px 10px" }}>
+                      <option value="">— عشوائي بالكامل —</option>
+                      {members.filter(m => m.role !== "admin").map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={label}>المعيار *</div>
+                  <select value={f.criterion} onChange={e => setDrawForm(x => ({ ...x, criterion: e.target.value }))} style={{ ...inp, marginBottom: 12 }}>
+                    {crits.map(k => <option key={k} value={k}>{CRITERIA[k].l}</option>)}
+                  </select>
+
+                  {f.draw_type === "period" && (
+                    <>
+                      <div style={label}>الفترة</div>
+                      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                        {[[1, "آخر يوم"], [2, "آخر يومين"], [3, "آخر 3 أيام"]].map(([n, l]) => {
+                          const on = Number(f.days_back) === n && !f.period_from;
+                          return (
+                            <button key={n} onClick={() => setDrawForm(x => ({ ...x, days_back: n, period_from: "", period_to: "" }))}
+                              style={{ flex: 1, minWidth: 80, padding: "8px 4px", borderRadius: 10, border: `2px solid ${on ? "#2563EB" : "#E2E8F0"}`, background: on ? "#EFF6FF" : "#F8FAFC", color: on ? "#2563EB" : "#64748B", fontSize: 12, fontWeight: 600 }}>{l}</button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                        <input type="date" value={f.period_from} onChange={e => setDrawForm(x => ({ ...x, period_from: e.target.value }))} style={inp} />
+                        <input type="date" value={f.period_to} onChange={e => setDrawForm(x => ({ ...x, period_to: e.target.value }))} style={inp} />
+                      </div>
+                    </>
+                  )}
+
+                  {preview && (
+                    <div style={{ background: preview.winners.length ? "#ECFDF5" : "#FEF2F2", border: `1px solid ${preview.winners.length ? "#A7F3D0" : "#FECACA"}`, borderRadius: 10, padding: "9px 12px", fontSize: 12, color: preview.winners.length ? "#059669" : "#DC2626", marginBottom: 12, lineHeight: 1.8 }}>
+                      {preview.winners.length
+                        ? <>الفايز دلوقتي: <b>{preview.winners.join("، ")}</b>{preview.winners.length > 1 ? " (تعادل — الكل هيكسب)" : ""}<br />
+                           <span style={{ color: "#64748B", fontSize: 11 }}>من {range.from} لـ {range.to}</span></>
+                        : "مفيش حد حقق نتيجة في المعيار ده خلال الفترة"}
+                    </div>
+                  )}
+                </>
+              )}
+
+              <button onClick={() => setDrawForm(x => ({ ...x, announce: !x.announce }))}
+                style={{ width: "100%", background: f.announce ? "#EFF6FF" : "#F1F5F9", border: `1.5px solid ${f.announce ? "#BFDBFE" : "#E2E8F0"}`, color: f.announce ? "#2563EB" : "#94A3B8", padding: "9px", borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 14 }}>
+                {f.announce ? "✓ إعلان مسبق للفريق" : "بدون إعلان"}
               </button>
-              <button onClick={() => setNewDraw(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={startDraw} disabled={saving}
+                  style={{ flex: 1, background: saving ? "#94A3B8" : "linear-gradient(135deg,#D97706,#B45309)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
+                  {saving ? "..." : isQ ? "ابدأي السحب 🎲" : "نفّذي السحب 🏆"}
+                </button>
+                <button onClick={() => setNewDraw(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
     </div>
   );
 }
