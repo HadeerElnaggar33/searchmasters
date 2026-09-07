@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { sb, addHistory, addNotification, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH, MONTHS } from "../supabase.js";
+import { sb, addHistory, addNotification, notifyAdmins, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH, MONTHS } from "../supabase.js";
 import { SCORE, addScore, replaceTaskScore, clearTaskScore, monthLabelOf, inWorkHours,
   DIFFICULTY, loadPointsConfig, computeTaskPoints, initiativePoints, longestSessionOf } from "../score.js";
 import { speechSupported, createRecognizer, parseTranscript } from "../voice.js";
@@ -424,13 +424,13 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     await sb(`tasks?id=eq.${task.id}`, "PATCH", updates);
     await addHistory(task.id, "status_changed", user.name, `${STATUS_CONFIG[task.status]?.label} → ${STATUS_CONFIG[newStatus]?.label}`);
     if (newStatus === "completed") {
-      await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
+      await notifyAdmins(`✅ ${user.name} أتم: ${task.title}`, "done", task.id);
       if (timerOf(task.id)) { await stopTimer(user.name, task.id); setRunningTimers(await activeTimers(user.name)); }
       const hadTime = await taskHasTime(task.id);
       if (!hadTime && task.assigned_to === user.name) await noticeClosedWithoutTime(task, user.name);
       await awardTaskPoints(task);
     }
-    if (newStatus === "pending_review") await addNotification("هدير", `👁 ${user.name} أرسل للمراجعة: ${task.title}`, "review", task.id);
+    if (newStatus === "pending_review") await notifyAdmins(`👁 ${user.name} أرسل للمراجعة: ${task.title}`, "review", task.id);
     patchTask(task.id, updates);
     if (task.parent_task_id) setTimeout(() => syncParent(task.parent_task_id), 500);
     if (showDetail?.id === task.id) openDetail({ ...task, status: newStatus });
@@ -439,7 +439,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   async function confirmComplete(task) {
     await sb(`tasks?id=eq.${task.id}`, "PATCH", { status: "completed", completed_at: new Date().toISOString(), delay_reason: delayReason });
     await addHistory(task.id, "completed", user.name, delayReason ? `مكتمل مع تأخير: ${delayReason}` : "مكتمل في الموعد");
-    await addNotification("هدير", `✅ ${user.name} أتم: ${task.title}`, "done", task.id);
+    await notifyAdmins(`✅ ${user.name} أتم: ${task.title}`, "done", task.id);
     await awardTaskPoints(task);
     setShowDelay(null); setDelayReason(""); await loadAll(); setShowDetail(null);
   }
@@ -451,7 +451,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     const newDate = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,"0")}-${String(next.getDate()).padStart(2,"0")}`;
     await sb(`tasks?id=eq.${task.id}`, "PATCH", { due_date: newDate, shift_count: (task.shift_count||0)+1, shift_reason: shiftReason });
     await addHistory(task.id, "shifted", user.name, `تأجيل إلى ${formatDate(newDate)}. السبب: ${shiftReason}`);
-    await addNotification("هدير", `⏩ ${user.name} أجّل: ${task.title} إلى ${formatDate(newDate)}`, "shift", task.id);
+    await notifyAdmins(`⏩ ${user.name} أجّل: ${task.title} إلى ${formatDate(newDate)}`, "shift", task.id);
     setShowShift(null); setShiftReason(""); await loadAll();
     if (showDetail?.id === task.id) openDetail({ ...task, due_date: newDate });
   }
