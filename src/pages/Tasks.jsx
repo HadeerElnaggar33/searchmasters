@@ -75,6 +75,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   const [newComment, setNewComment] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterAssignee, setFilterAssignee] = useState("all");
+  const [filterProject, setFilterProject] = useState("all");
+  const [filterType, setFilterType] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [filterOverdue, setFilterOverdue] = useState(false);
   const [dayView, setDayView] = useState("today");     // today | tomorrow | week | late | kitchen | all | pick
@@ -1011,7 +1013,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     return true;
   }
 
-  const filtered = tasks.filter(t => {
+  // الأساس: كل الفلاتر ماعدا فلتر اليوم — العدادات بتتحسب منه
+  const baseFiltered = tasks.filter(t => {
     // الموظف يشوف تاسكاته بس · واللي عنده صلاحية إدارة التاسكات يشوف الفريق كله
     // التاسك بتظهر للمسؤول الأساسي بس · المساعد بيتشاف اسمه عليها لكن مش في قائمته
     if (!canAssign && t.assigned_to !== user.name) return false;
@@ -1019,10 +1022,13 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     if (filterAssignee !== "all" && t.assigned_to !== filterAssignee) return false;
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterOverdue && !isLate(t)) return false;
-    if (!inDayView(t)) return false;
+    if (filterProject !== "all" && String(t.project_id || "") !== String(filterProject)) return false;
+    if (filterType !== "all" && t.task_type !== filterType) return false;
     if (search && !t.title.toLowerCase().includes(search.toLowerCase()) && !t.assigned_to?.includes(search) && !parseHelpers(t.helpers).some(h => h.includes(search))) return false;
     return true;
   });
+
+  const filtered = baseFiltered.filter(inDayView);
 
   const HelperPicker = ({ value, owner, onChange }) => {
     const list = value || [];
@@ -1127,6 +1133,49 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
         </div>
       </div>
 
+      {/* ═══ شريط فلاتر الأيام (تعديل ١) ═══ */}
+      {(() => {
+        const c = {
+          kitchen:  baseFiltered.filter(isKitchen).length,
+          late:     baseFiltered.filter(isLate).length,
+          today:    baseFiltered.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === today && !isLate(t)).length,
+          tomorrow: baseFiltered.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === tomorrowStr).length,
+          week:     baseFiltered.filter(t => !isKitchen(t) && t.due_date && String(t.due_date).slice(0,10) >= today && String(t.due_date).slice(0,10) <= weekEndStr).length,
+          all:      baseFiltered.length,
+        };
+        const BTNS = [
+          ["kitchen",  "🍳 المطبخ",  "#D97706", "#FFFBEB"],
+          ["late",     "🔴 متأخر",   "#DC2626", "#FEF2F2"],
+          ["today",    "النهارده",   "#2563EB", "#EFF6FF"],
+          ["tomorrow", "بكرا",       "#7C3AED", "#F5F3FF"],
+          ["week",     "الأسبوع ده", "#0891B2", "#ECFEFF"],
+          ["all",      "الكل",       "#64748B", "#F1F5F9"],
+        ];
+        return (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
+            {BTNS.map(([v, l, col, bg]) => {
+              const on = dayView === v;
+              return (
+                <button key={v} onClick={() => { setDayView(v); setPageSize(40); }}
+                  style={{ padding: "7px 13px", borderRadius: 20, border: `2px solid ${on ? col : "#E2E8F0"}`, background: on ? bg : "#FFFFFF", color: on ? col : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+                  {l}
+                  <span style={{ fontSize: 10, marginRight: 5, opacity: 0.75 }}>{c[v]}</span>
+                </button>
+              );
+            })}
+            <input type="date" value={pickedDay}
+              onChange={e => { setPickedDay(e.target.value); setDayView(e.target.value ? "pick" : "today"); setPageSize(40); }}
+              style={{ background: dayView === "pick" ? "#EFF6FF" : "#F8FAFC", border: `2px solid ${dayView === "pick" ? "#2563EB" : "#E2E8F0"}`, color: "#0F172A", padding: "6px 10px", borderRadius: 20, fontSize: 12, outline: "none" }} />
+          </div>
+        );
+      })()}
+
+      {dayView === "kitchen" && (
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "9px 14px", marginBottom: 12, fontSize: 12, color: "#D97706", lineHeight: 1.8 }}>
+          🍳 <b>المطبخ:</b> تاسكات ليها مسؤول ولسه مالهاش تاريخ تسليم · <b>مستبعدة من النقاط ومؤشر الضغط</b> · أول ما تحطي تاريخ بتخرج لـ To Do لوحدها
+        </div>
+      )}
+
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 بحث..." style={{ ...inp, flex: 1, minWidth: 150, padding: "8px 12px" }} />
@@ -1144,7 +1193,52 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
           <option value="all">كل الأولويات</option>
           {Object.entries(PRIORITY_CONFIG).map(([k,v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
         </select>
+
+        {/* فلتر المشروع */}
+        <select value={filterProject} onChange={e => { setFilterProject(e.target.value); setPageSize(40); }}
+          style={{ ...inp, width: "auto", padding: "8px 10px", fontSize: 12 }}>
+          <option value="all">📁 كل المشاريع</option>
+          {projects.map(p2 => <option key={p2.id} value={p2.id}>{p2.name}</option>)}
+        </select>
+
+        {/* فلتر نوع التاسك */}
+        <select value={filterType} onChange={e => { setFilterType(e.target.value); setPageSize(40); }}
+          style={{ ...inp, width: "auto", padding: "8px 10px", fontSize: 12 }}>
+          <option value="all">🏷 كل الأنواع</option>
+          {[...new Set(taskTypes.map(t => t.group_name))].map(g => (
+            <optgroup key={g} label={g}>
+              {taskTypes.filter(t => t.group_name === g).map(t => (
+                <option key={t.name} value={t.name}>{t.name}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
       </div>
+
+      {/* ملخص الفلاتر النشطة */}
+      {(filterProject !== "all" || filterType !== "all" || filterAssignee !== "all" || filterStatus !== "all" || filterPriority !== "all" || search) && (
+        <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 12, padding: "8px 13px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "#2563EB", fontWeight: 700 }}>
+            الفلترة شغالة · {baseFiltered.length} تاسك
+          </span>
+          {filterProject !== "all" && (
+            <span style={{ fontSize: 11, background: "#FFFFFF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "2px 9px", borderRadius: 20 }}>
+              📁 {(projects.find(p2 => String(p2.id) === String(filterProject)) || {}).name}
+            </span>
+          )}
+          {filterType !== "all" && (
+            <span style={{ fontSize: 11, background: "#FFFFFF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "2px 9px", borderRadius: 20 }}>🏷 {filterType}</span>
+          )}
+          {filterAssignee !== "all" && (
+            <span style={{ fontSize: 11, background: "#FFFFFF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "2px 9px", borderRadius: 20 }}>👤 {filterAssignee}</span>
+          )}
+          <div style={{ flex: 1 }}></div>
+          <button onClick={() => { setFilterProject("all"); setFilterType("all"); setFilterAssignee("all"); setFilterStatus("all"); setFilterPriority("all"); setSearch(""); setPageSize(40); }}
+            style={{ background: "#FFFFFF", border: "1px solid #BFDBFE", color: "#2563EB", padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600 }}>
+            مسح الفلاتر ✕
+          </button>
+        </div>
+      )}
 
       {/* Stats bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
@@ -2046,49 +2140,6 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
           </div>
         );
       })()}
-
-      {/* ═══ شريط فلاتر الأيام (تعديل ١) ═══ */}
-      {(() => {
-        const counts = {
-          today:    tasks.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === today && !isLate(t)).length,
-          tomorrow: tasks.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === tomorrowStr).length,
-          week:     tasks.filter(t => !isKitchen(t) && t.due_date && String(t.due_date).slice(0,10) >= today && String(t.due_date).slice(0,10) <= weekEndStr).length,
-          late:     tasks.filter(isLate).length,
-          kitchen:  tasks.filter(isKitchen).length,
-          all:      tasks.length,
-        };
-        const BTNS = [
-          ["today",    "النهارده",   "#2563EB", "#EFF6FF", "#BFDBFE"],
-          ["tomorrow", "بكرا",       "#7C3AED", "#F5F3FF", "#DDD6FE"],
-          ["week",     "الأسبوع ده", "#0891B2", "#ECFEFF", "#A5F3FC"],
-          ["late",     "🔴 متأخر",   "#DC2626", "#FEF2F2", "#FECACA"],
-          ["kitchen",  "🍳 المطبخ",  "#D97706", "#FFFBEB", "#FDE68A"],
-          ["all",      "الكل",       "#64748B", "#F1F5F9", "#E2E8F0"],
-        ];
-        return (
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
-            {BTNS.map(([v, l, c, bg, br]) => {
-              const on = dayView === v;
-              return (
-                <button key={v} onClick={() => { setDayView(v); setPageSize(40); }}
-                  style={{ padding: "7px 13px", borderRadius: 20, border: `2px solid ${on ? c : "#E2E8F0"}`, background: on ? bg : "#FFFFFF", color: on ? c : "#64748B", fontSize: 12, fontWeight: on ? 700 : 500 }}>
-                  {l}
-                  <span style={{ fontSize: 10, marginRight: 5, opacity: 0.75 }}>{counts[v]}</span>
-                </button>
-              );
-            })}
-            <input type="date" value={pickedDay}
-              onChange={e => { setPickedDay(e.target.value); setDayView(e.target.value ? "pick" : "today"); setPageSize(40); }}
-              style={{ background: dayView === "pick" ? "#EFF6FF" : "#F8FAFC", border: `2px solid ${dayView === "pick" ? "#2563EB" : "#E2E8F0"}`, color: "#0F172A", padding: "6px 10px", borderRadius: 20, fontSize: 12, outline: "none" }} />
-          </div>
-        );
-      })()}
-
-      {dayView === "kitchen" && (
-        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "9px 14px", marginBottom: 12, fontSize: 12, color: "#D97706", lineHeight: 1.8 }}>
-          🍳 <b>المطبخ:</b> تاسكات ليها مسؤول ولسه مالهاش تاريخ تسليم · <b>مستبعدة من النقاط ومؤشر الضغط</b> · أول ما تحطي تاريخ بتخرج لـ To Do لوحدها
-        </div>
-      )}
 
       {filterOverdue && (
         <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "9px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
