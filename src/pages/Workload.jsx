@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb, STATUS_CONFIG, PRIORITY_CONFIG, formatDate, CURRENT_MONTH } from "../supabase.js";
 
 function parseHelpers(val) {
@@ -89,7 +90,7 @@ export default function Workload({ user }) {
             <div key={m.id} style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${load.color}33`, borderRadius: 16, overflow: "hidden" }}>
               {/* Header */}
               <div style={{ padding: "14px 16px", background: "rgba(255,255,255,0.02)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ width: 42, height: 42, borderRadius: "50%", background: m.avatar_color || "#6366F1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, flexShrink: 0 }}>{m.name[0]}</div>
+                <Avatar member={m} size={42} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>{m.name}</div>
                   <div style={{ fontSize: 12, color: "#9CA3AF" }}>{m.job_title}</div>
