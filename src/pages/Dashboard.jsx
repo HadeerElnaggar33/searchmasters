@@ -266,12 +266,16 @@ export default function Dashboard({ user, onNavigate }) {
   // ═══ الرسائل والتنبيهات (تعديل ١٣) ═══
   const alerts = {};
   const msgs = [];
-  if (hoursPct < hoursThreshold) {
+  // وضع الإجازة (تعديل ٥٦): مفيش تنبيهات ولا رسائل ولا مقارنات
+  const onLeaveToday = !!(attendance.find(a => a.member_name === user.name && a.status === "leave"));
+  // العضو الجديد (تعديل ٥٨): معفي من المقارنات لحد ما مدة الإعفاء تخلص
+  const inGrace = !!(me && me.grace_until && today <= String(me.grace_until).slice(0, 10));
+  if (!onLeaveToday && !inGrace && hoursPct < hoursThreshold) {
     const need = Math.max(0, Math.round((expectedMins - monthMins) / 60));
     alerts.hours = `ناقص ${need} ساعة`;
     msgs.push({ p: 1, t: `باقي لك ${need} ساعة تلحق المعدل، يلا نشد شوية` });
   }
-  if (myRank > 3 && myRank > 0) {
+  if (!onLeaveToday && !inGrace && myRank > 3 && myRank > 0) {
     const third = ranked[2];
     const gap = Math.max(0, Math.round(((totals[third] || 0) - myPoints) * 10) / 10);
     alerts.rank = `ترتيبك ${myRank}`;
@@ -280,8 +284,12 @@ export default function Dashboard({ user, onNavigate }) {
   if (hoursPct >= hoursThreshold) msgs.push({ p: 5, t: "ساعاتك تمام، ماشي في الطريق الصح" });
   if (myRank > 0 && myRank <= 3) msgs.push({ p: 4, t: `إنت في التلاتة الأوائل، ثبّت مكانك` });
   if (wonThisWeek.length > 0) msgs.push({ p: 6, t: "خدت جايزة الأسبوع، يلا جدع نجيب اللي بعدها" });
-  if (overdue.length > 0) { alerts.tasks = `${overdue.length} متأخرة`; }
-  const topMsg = msgs.sort((a, b) => a.p - b.p)[0];
+  if (!onLeaveToday && overdue.length > 0) { alerts.tasks = `${overdue.length} متأخرة`; }
+  const topMsg = onLeaveToday
+    ? { p: 0, t: "إنت في إجازة النهاردة 🏖 — سيب الشغل واستريح، والنظام مش بيحسب عليك حاجة" }
+    : inGrace
+      ? { p: 0, t: "أهلاً بيك في الفريق 👋 — إنت في فترة تعارف، مفيش مقارنات ولا تنبيهات دلوقتي" }
+      : msgs.sort((a, b) => a.p - b.p)[0];
 
   // ═══ قسم صباحك ═══
   const s = seed(user.name + today);
@@ -477,10 +485,12 @@ export default function Dashboard({ user, onNavigate }) {
 
         // مين محتاج متابعة
         const needFollow = members.map(m => {
+          const onLeave = !!attendance.find(a => a.member_name === m.name && a.status === "leave");
+          const grace = !!(m.grace_until && today <= String(m.grace_until).slice(0, 10));
           const late = tOverdue.filter(t => t.assigned_to === m.name).length;
           const stalled = teamLive.filter(t => t.assigned_to === m.name && t.status === "todo").length;
-          return { m, late, stalled };
-        }).filter(x => x.late > 0).sort((a, b) => b.late - a.late);
+          return { m, late, stalled, skip: onLeave || grace };
+        }).filter(x => x.late > 0 && !x.skip).sort((a, b) => b.late - a.late);
 
         // مين تحت ضغط (من نقاط الضغط أمس)
         const pressRows = ledger.filter(r => r.source === "pressure");
