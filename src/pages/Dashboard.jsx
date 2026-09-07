@@ -53,6 +53,7 @@ export default function Dashboard({ user, onNavigate }) {
   const [clapToday, setClapToday] = useState(null);
   const [clapCount, setClapCount] = useState(0);
   const [clapping, setClapping] = useState(false);
+  const [profilesDone, setProfilesDone] = useState([]);
   const [busy, setBusy] = useState(false);
 
   // قسم صباحك
@@ -76,7 +77,7 @@ export default function Dashboard({ user, onNavigate }) {
     const yy = new Date().getFullYear();
     const lastD = new Date(yy, new Date().getMonth() + 1, 0).getDate();
 
-    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv, sk, hr, cl] = await Promise.all([
+    const [t, m, a, n, w, nom, lg, mb, ab, ma, c, st, mq, mAns, ds, gf, lv, sk, hr, cl, pr] = await Promise.all([
       sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&order=created_at.desc`),
       sb("team_members?is_active=eq.true&order=name"),
       sb(`attendance?date=eq.${today}&order=created_at`),
@@ -97,6 +98,7 @@ export default function Dashboard({ user, onNavigate }) {
       loadStickers(),
       sb("help_requests?status=eq.open&order=created_at.desc"),
       sb("clap_log?select=from_member,to_member,clap_date"),
+      sb("member_profiles?select=member_name"),
     ]);
 
     if (t) setTasks(t);
@@ -122,6 +124,7 @@ export default function Dashboard({ user, onNavigate }) {
       setClapToday(cl.find(x => x.from_member === user.name && String(x.clap_date).slice(0, 10) === today) || null);
       setClapCount(cl.length);
     }
+    if (pr) setProfilesDone(pr.map(x => x.member_name));
     setLoading(false);
   }
 
@@ -419,6 +422,24 @@ export default function Dashboard({ user, onNavigate }) {
         </div>
       )}
 
+      {/* ═══════════ عيد الميلاد ═══════════ */}
+      {(() => {
+        if (settings.feature_birthday === "0") return null;
+        const md = today.slice(5);
+        const bdays = members.filter(m => m.birthday && m.birthday_public !== false && String(m.birthday).slice(5, 10) === md);
+        if (bdays.length === 0) return null;
+        return (
+          <div style={{ background: "linear-gradient(135deg,#FDF2F8,#FFFBEB)", border: "1px solid #FBCFE8", borderRadius: 18, padding: "16px 18px", marginBottom: 16, textAlign: "center" }}>
+            <div style={{ fontSize: 34, marginBottom: 6 }}>🎂</div>
+            {bdays.map(m => (
+              <div key={m.id} style={{ fontSize: 15, fontWeight: 800, color: "#DB2777", lineHeight: 1.8 }}>
+                النهاردة عيد ميلاد {m.name}، كل سنة وهو طيب 🎉
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* ═══════════ شريط الترحيب ═══════════ */}
       <div style={{ ...C.card, marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 150 }}>
@@ -528,6 +549,25 @@ export default function Dashboard({ user, onNavigate }) {
                 ))}
               </div>
             )}
+
+            {/* بروفايلات ناقصة */}
+            {(() => {
+              const missing = members.filter(m => !profilesDone.includes(m.name));
+              if (missing.length === 0) return null;
+              return (
+                <div style={{ ...C.card, marginBottom: 16, borderRight: "3px solid #7C3AED" }}>
+                  <div style={{ fontSize: 14, ...C.heading, marginBottom: 4 }}>👤 لسه ما ملوش بروفايله ({missing.length})</div>
+                  <div style={C.sub}>للتشجيع بس · مفيش أي إجبار</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                    {missing.map(m => (
+                      <span key={m.id} style={{ fontSize: 12, background: "#F5F3FF", color: "#7C3AED", border: "1px solid #DDD6FE", padding: "4px 12px", borderRadius: 20, fontWeight: 600 }}>
+                        {m.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* طلبات الحقوني الجارية */}
             {helpOpenReqs.length > 0 && (
