@@ -111,7 +111,11 @@ export default function Templates({ user }) {
     if (!t.frequency || t.frequency === "none") { alert("القالب ده مفيهوش تكرار — عدّليه وحددي المعدل"); return; }
     if (!assignee) { alert("اختاري المسؤول عن التكرار ده"); return; }
     const list = t.tasks || [];
-    for (const item of list) {
+    const mainsIdx = {};
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      if (item.parent_index !== undefined && item.parent_index !== "") continue;   // البنود بعدين
+      mainsIdx[i] = true;
       await sb("recurring_tasks", "POST", {
         title: item.title,
         task_type: item.task_type,
@@ -127,7 +131,31 @@ export default function Templates({ user }) {
         created_by: user.name,
       });
     }
-    alert(`✅ اتفعّل تكرار «${t.name}» لـ${assignee} — ${list.length} تاسك هتتولد كل مرة`);
+
+    // البنود التابعة — بتتولد بعد الرئيسية وبتشاور عليها بالعنوان
+    for (const item of list) {
+      if (item.parent_index === undefined || item.parent_index === "") continue;
+      const parent = list[Number(item.parent_index)];
+      await sb("recurring_tasks", "POST", {
+        title: item.title,
+        task_type: item.task_type,
+        priority: item.priority || "medium",
+        project_id: projectId || null,
+        assigned_to: assignee,
+        frequency: t.frequency === "daily" ? "daily" : t.frequency,
+        day_of_week: (t.days_of_week ? String(t.days_of_week).split(",")[0] : 1),
+        days_of_week: t.days_of_week || null,
+        day_of_month: t.day_of_month || 1,
+        template_id: String(t.id),
+        parent_title: parent ? parent.title : null,
+        is_active: true,
+        created_by: user.name,
+      });
+    }
+
+    const mainsN = list.filter(x => !x.parent_index).length;
+    const subsN = list.length - mainsN;
+    alert(`✅ اتفعّل تكرار «${t.name}» لـ${assignee}\n\n${mainsN} تاسك رئيسية${subsN ? ` و${subsN} بند تحتها` : ""} هيتولدوا كل مرة`);
     await loadAll();
   }
 
@@ -437,15 +465,37 @@ export default function Templates({ user }) {
               <input value={tForm.name} onChange={e => setTForm(f => ({ ...f, name: e.target.value }))} placeholder="اسم القالب" style={inp} />
               <input value={tForm.description} onChange={e => setTForm(f => ({ ...f, description: e.target.value }))} placeholder="وصف القالب" style={inp} />
               <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>التاسكات</div>
-              {tForm.tasks.map((t, i) => (
-                <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input value={t.title} onChange={e => { const tasks = [...tForm.tasks]; tasks[i] = { ...tasks[i], title: e.target.value }; setTForm(f => ({ ...f, tasks })); }} placeholder={`تاسك ${i + 1}`} style={{ ...inp, flex: 1 }} />
-                  <select value={t.priority} onChange={e => { const tasks = [...tForm.tasks]; tasks[i] = { ...tasks[i], priority: e.target.value }; setTForm(f => ({ ...f, tasks })); }} style={{ ...inp, width: "auto", padding: "10px 8px" }}>
-                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.icon}</option>)}
-                  </select>
-                  <button onClick={() => setTForm(f => ({ ...f, tasks: f.tasks.filter((_, j) => j !== i) }))} style={{ background: "rgba(239,68,68,0.1)", color: "#FCA5A5", padding: "8px 10px", borderRadius: 8, fontSize: 14 }}>✕</button>
-                </div>
-              ))}
+              {tForm.tasks.map((t, i) => {
+                const isSub = !!t.parent_index && t.parent_index !== "";
+                const mains = tForm.tasks.map((x, j) => ({ x, j })).filter(o => !o.x.parent_index && o.j !== i);
+                return (
+                  <div key={i} style={{ marginRight: isSub ? 22 : 0, borderRight: isSub ? "2px dashed rgba(255,255,255,0.15)" : "none", paddingRight: isSub ? 10 : 0 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 5 }}>
+                      <input value={t.title} onChange={e => { const tasks = [...tForm.tasks]; tasks[i] = { ...tasks[i], title: e.target.value }; setTForm(f => ({ ...f, tasks })); }}
+                        placeholder={isSub ? `بند ${i + 1}` : `تاسك ${i + 1}`} style={{ ...inp, flex: 1 }} />
+                      <select value={t.priority} onChange={e => { const tasks = [...tForm.tasks]; tasks[i] = { ...tasks[i], priority: e.target.value }; setTForm(f => ({ ...f, tasks })); }} style={{ ...inp, width: "auto", padding: "10px 8px" }}>
+                        {Object.entries(PRIORITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.icon}</option>)}
+                      </select>
+                      <button onClick={() => setTForm(f => ({ ...f, tasks: f.tasks.filter((_, j) => j !== i).map(x => (String(x.parent_index) === String(i) ? { ...x, parent_index: "" } : x)) }))}
+                        style={{ background: "rgba(239,68,68,0.1)", color: "#FCA5A5", padding: "8px 10px", borderRadius: 8, fontSize: 14 }}>✕</button>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, color: "#9CA3AF" }}>النوع:</span>
+                      <button onClick={() => { const tasks = [...tForm.tasks]; tasks[i] = { ...tasks[i], parent_index: "" }; setTForm(f => ({ ...f, tasks })); }}
+                        style={{ padding: "4px 11px", borderRadius: 20, border: `1.5px solid ${!isSub ? "#8B5CF6" : "rgba(255,255,255,0.1)"}`, background: !isSub ? "rgba(139,92,246,0.15)" : "transparent", color: !isSub ? "#C4B5FD" : "#9CA3AF", fontSize: 11, fontWeight: !isSub ? 700 : 500 }}>
+                        تاسك رئيسي
+                      </button>
+                      {mains.length > 0 && (
+                        <select value={t.parent_index || ""} onChange={e => { const tasks = [...tForm.tasks]; tasks[i] = { ...tasks[i], parent_index: e.target.value }; setTForm(f => ({ ...f, tasks })); }}
+                          style={{ ...inp, width: "auto", padding: "4px 9px", fontSize: 11 }}>
+                          <option value="">— أو Subtask تحت —</option>
+                          {mains.map(o => <option key={o.j} value={String(o.j)}>{o.x.title || `تاسك ${o.j + 1}`}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
               <button onClick={() => setTForm(f => ({ ...f, tasks: [...f.tasks, { title: "", task_type: "Keyword Research", priority: "medium" }] }))} style={{ background: "rgba(99,102,241,0.1)", color: "#A5B4FC", padding: "8px", borderRadius: 10, fontSize: 13 }}>+ إضافة تاسك</button>
               {/* ═══ التكرار داخل القالب (بند ١٢) ═══ */}
               <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8 }}>🔄 التكرار</div>
