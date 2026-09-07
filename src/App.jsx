@@ -25,7 +25,7 @@ import Live from "./pages/Live.jsx";
 import TabHub from "./pages/TabHub.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
-import { heartbeat, activeTimer, stopTimer, fmtClock } from "./timer.js";
+import { heartbeat, activeTimers, stopTimer, fmtClock } from "./timer.js";
 
 const ITEMS = {
   dashboard:     { icon: "🏠", label: "الرئيسية" },
@@ -98,7 +98,7 @@ export default function App() {
   const [closedSections, setClosedSections] = useState(() => { try { return JSON.parse(localStorage.getItem("sm_nav_sections") || "[]"); } catch (e) { return []; } });
   const [pinned, setPinned] = useState(() => { try { return JSON.parse(localStorage.getItem("sm_nav_pinned") || "[]"); } catch (e) { return []; } });
   const [counts, setCounts] = useState({});
-  const [timer, setTimer] = useState(null);
+  const [timers, setTimers] = useState([]);
   // مؤقت العمل (الحضور) — تعديل ٣
   const [work, setWork] = useState({ record: null, open: null, doneMins: 0 });
   const [workBusy, setWorkBusy] = useState(false);
@@ -202,24 +202,24 @@ export default function App() {
     await loadWork();
   }
 
-  // ── تايمر التاسكات في البار العلوي ──
+  // ── تايمرات التاسكات (متوازية) — بتظهر في سايدبار ثابت ──
   useEffect(() => {
     if (!user) return;
-    const load = () => activeTimer(user.name).then(setTimer).catch(() => {});
+    const load = () => activeTimers(user.name).then(setTimers).catch(() => {});
     load();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [user, page]);
 
   useEffect(() => {
-    if (!timer) return;
+    if (timers.length === 0) return;
     const t = setInterval(() => setTick(x => x + 1), 1000);
     return () => clearInterval(t);
-  }, [timer]);
+  }, [timers.length]);
 
-  async function stopTopTimer() {
-    await stopTimer(user.name);
-    setTimer(null);
+  async function stopOneTimer(taskId) {
+    await stopTimer(user.name, taskId);
+    setTimers(list => list.filter(x => String(x.task_id) !== String(taskId)));
   }
 
   // ── تعديل ٥: البحث السريع ──
@@ -473,6 +473,13 @@ export default function App() {
                   onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#64748B"; }}}>
                   <span style={{ fontSize: 17, flexShrink: 0 }}>{it.icon}</span>
                   {!navCollapsed && <span style={{ flex: 1, textAlign: "right" }}>{it.label}{it.soon ? " ⏳" : ""}</span>}
+                  {!navCollapsed && !it.soon && (
+                    <span onClick={e => { e.stopPropagation(); togglePin(key2); }}
+                      title={pinned.includes(key2) ? "شيل من المثبت" : "ثبّت في الأعلى"}
+                      style={{ fontSize: 11, color: pinned.includes(key2) ? "#D97706" : "#CBD5E1", flexShrink: 0, padding: "0 2px", cursor: "pointer" }}>
+                      {pinned.includes(key2) ? "📌" : "📍"}
+                    </span>
+                  )}
                   {b && (
                     <span style={{
                       background: b.alert ? "#EF4444" : "#EFF6FF",
@@ -483,13 +490,7 @@ export default function App() {
                     }}>{b.v > 99 ? "99+" : b.v}</span>
                   )}
                 </button>
-                {!navCollapsed && !it.soon && (
-                  <button onClick={e => { e.stopPropagation(); togglePin(key2); }}
-                    title={pinned.includes(key2) ? "شيل من المثبت" : "ثبّت في الأعلى"}
-                    style={{ position: "absolute", left: 4, top: "50%", transform: "translateY(-50%)", background: "none", color: pinned.includes(key2) ? "#D97706" : "#E2E8F0", fontSize: 11, padding: 2 }}>
-                    {pinned.includes(key2) ? "📌" : "📍"}
-                  </button>
-                )}
+
               </div>
             );
           };
@@ -552,6 +553,46 @@ export default function App() {
 
       {/* نافذة السحب — بتظهر لوحدها في أي صفحة */}
       <DrawPopup user={user} />
+
+      {/* ═══ سايدبار التايمرات الشغالة — في كل الصفحات (بند ٧) ═══ */}
+      {timers.length > 0 && (
+        <div style={{
+          position: "fixed", zIndex: 480,
+          ...(isMobile
+            ? { bottom: 72, left: 10, right: 10 }
+            : { top: 70, left: 14, width: 230 }),
+          display: "flex", flexDirection: "column", gap: 7,
+        }}>
+          <div style={{ background: "#065F46", color: "#fff", borderRadius: 12, padding: "6px 12px", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>⏱</span>
+            <span style={{ flex: 1 }}>تايمرات شغالة ({timers.length})</span>
+          </div>
+          {timers.map(t => (
+            <div key={t.id} style={{ background: "#FFFFFF", border: "2px solid #A7F3D0", borderRadius: 14, padding: "9px 12px", boxShadow: "0 4px 14px rgba(5,150,105,0.18)" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>
+                {t.task_title}
+              </div>
+              {t.project_name && (
+                <div style={{ fontSize: 10, color: "#94A3B8", marginBottom: 5 }}>📁 {t.project_name}</div>
+              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, fontSize: 16, fontWeight: 800, color: "#059669", fontVariantNumeric: "tabular-nums" }}>
+                  {fmtClock(Math.floor((Date.now() - new Date(t.started_at)) / 1000))}
+                </span>
+                <button onClick={() => stopOneTimer(t.task_id)} title="إيقاف"
+                  style={{ background: "#DC2626", color: "#fff", padding: "4px 12px", borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+                  ⏹ إيقاف
+                </button>
+              </div>
+            </div>
+          ))}
+          {timers.length > 1 && (
+            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "6px 10px", fontSize: 10, color: "#D97706", lineHeight: 1.6 }}>
+              شغل أكتر من تايمر مع بعض أمر طبيعي ومسموح
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ═══ البحث السريع ═══ */}
       {searchOpen && (() => {
@@ -658,18 +699,10 @@ export default function App() {
             );
           })()}
 
-          {/* تايمر التاسكة */}
-          {timer && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 20, padding: isMobile ? "3px 8px" : "4px 12px" }}>
-              <span style={{ fontSize: 13 }}>⏱</span>
-              {!isMobile && (
-                <span style={{ fontSize: 11, color: "#059669", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{timer.task_title}</span>
-              )}
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#059669", fontVariantNumeric: "tabular-nums" }}>
-                {fmtClock(Math.floor((Date.now() - new Date(timer.started_at)) / 1000))}
-              </span>
-              <button onClick={stopTopTimer} title="إيقاف" style={{ background: "#DC2626", color: "#fff", width: 20, height: 20, borderRadius: "50%", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>⏹</button>
-            </div>
+          {timers.length > 0 && (
+            <span title={`${timers.length} تايمر شغال`} style={{ fontSize: 11, background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "4px 10px", borderRadius: 20, fontWeight: 800 }}>
+              ⏱ {timers.length}
+            </span>
           )}
 
           {/* البحث */}
