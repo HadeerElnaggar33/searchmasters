@@ -23,6 +23,7 @@ import Badges from "./pages/Badges.jsx";
 import Draws, { DrawPopup } from "./pages/Draws.jsx";
 import Live from "./pages/Live.jsx";
 import TabHub from "./pages/TabHub.jsx";
+import Avatar from "./utils/Avatar.jsx";
 import Profile from "./pages/Profile.jsx";
 import Training from "./pages/Training.jsx";
 import { runRecurringEngine } from "./recurring.js";
@@ -101,6 +102,7 @@ export default function App() {
   const [closedSections, setClosedSections] = useState(() => { try { return JSON.parse(localStorage.getItem("sm_nav_sections") || "[]"); } catch (e) { return []; } });
   const [pinned, setPinned] = useState(() => { try { return JSON.parse(localStorage.getItem("sm_nav_pinned") || "[]"); } catch (e) { return []; } });
   const [counts, setCounts] = useState({});
+  const [me, setMe] = useState(null);
   const [timers, setTimers] = useState([]);
   // مؤقت العمل (الحضور) — تعديل ٣
   const [work, setWork] = useState({ record: null, open: null, doneMins: 0 });
@@ -260,6 +262,18 @@ export default function App() {
     setSearchOpen(false); setQ("");
     setPage(target);
   }
+
+  // ── بيانات العضو المحدّثة (الصورة الشخصية) ──
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const load = () => sb(`team_members?name=eq.${encodeURIComponent(user.name)}&select=name,avatar_url,avatar_color`)
+      .then(r => { if (alive && r && r[0]) setMe(r[0]); })
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 120000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user, page]);
 
   // ── نبضة التواجد: بتتحدث كل دقيقتين طول ما الأداة مفتوحة ──
   useEffect(() => {
@@ -555,7 +569,7 @@ export default function App() {
       {/* User */}
       <div style={{ padding: "12px 16px", borderTop: "1px solid #E2E8F0" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: "50%", background: user.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0, color: "#fff" }}>{user.name[0]}</div>
+          <Avatar member={me || user} size={34} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name}</div>
             <div style={{ fontSize: 10, color: "#94A3B8" }}>{user.job_title || user.role}</div>
@@ -770,7 +784,7 @@ onClick={() => setPage("notifications")}
             )}
           </div>
 
-          <div style={{ width: 30, height: 30, borderRadius: "50%", background: user.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>{user.name[0]}</div>
+          <Avatar member={me || user} size={30} />
           {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>{user.name}</span>}
           {!isMobile && <button onClick={logout} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>خروج</button>}
         </div>
