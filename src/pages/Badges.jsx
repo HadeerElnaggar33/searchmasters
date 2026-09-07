@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb, addNotification, CURRENT_MONTH } from "../supabase.js";
 import { runBadges, GRADES, IMPACT, medalPoints } from "../badges.js";
 import { inRange, fullStamp } from "../timeFilter.js";
@@ -209,7 +210,7 @@ export default function Badges({ user }) {
         return (
           <div key={m.id} style={card}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ width: 32, height: 32, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+              <Avatar member={m} size={32} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>{m.name}</div>
                 <div style={{ fontSize: 11, color: "#94A3B8" }}>{list.length} شارة</div>
