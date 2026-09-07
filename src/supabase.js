@@ -2,6 +2,32 @@ const URL = "https://qmucvkzzpeblpkbsgpwd.supabase.co";
 const KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFtdWN2a3p6cGVibHBrYnNncHdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0MjI5NjQsImV4cCI6MjEwMTk5ODk2NH0.QNW2_d70XZ_PpNQZvUJOuxSvr7FkZbSpmBPDMmjfYH8";
 const H = { "apikey": KEY, "Authorization": `Bearer ${KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
 
+// ── مين المدير؟ بيتجاب من قاعدة البيانات مش مكتوب في الكود ──
+let _adminsCache = null;
+let _adminsAt = 0;
+
+export async function getAdmins(force) {
+  const now = Date.now();
+  if (!force && _adminsCache && (now - _adminsAt) < 300000) return _adminsCache;
+  try {
+    const rows = await sb("team_members?role=eq.admin&is_active=eq.true&select=name");
+    _adminsCache = (rows || []).map(r => r.name).filter(Boolean);
+    _adminsAt = now;
+  } catch (e) {
+    _adminsCache = _adminsCache || [];
+  }
+  return _adminsCache;
+}
+
+// إشعار لكل المديرين — بديل الاسم المكتوب في الكود
+export async function notifyAdmins(content, type = "info", taskId = null) {
+  const admins = await getAdmins();
+  for (const a of admins) {
+    await addNotification(a, content, type, taskId);
+  }
+  return admins.length;
+}
+
 export const SB_URL = URL;
 export const SB_KEY = KEY;
 
