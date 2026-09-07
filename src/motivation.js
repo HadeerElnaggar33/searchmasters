@@ -125,6 +125,12 @@ export async function runMotivation(name) {
     const todayCount = sent.filter(r => dayOf(r.sent_date) === today).length;
     if (cap > 0 && todayCount >= cap) return null;
 
+    // وضع الإجازة والعضو الجديد: مفيش رسايل تحفيزية (تعديل ٥٦ · ٥٨)
+    const todayRow = await sb(`attendance?member_name=eq.${encodeURIComponent(name)}&date=eq.${today}&select=status`);
+    if ((todayRow || []).some(a => a.status === "leave")) return null;
+    const meRow = await sb(`team_members?name=eq.${encodeURIComponent(name)}&select=grace_until`);
+    if (meRow && meRow[0] && meRow[0].grace_until && today <= String(meRow[0].grace_until).slice(0,10)) return null;
+
     const [tasks, ledger, attendance, members] = await Promise.all([
       sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}`),
       loadLedger(CURRENT_MONTH),
