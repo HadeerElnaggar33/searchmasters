@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb } from "../supabase.js";
 import { buildBlocks, presenceOf, fmtDur, fmtClock, toISODate } from "../timer.js";
 import { loadWorkConfig, isWorkingDay, dayKind } from "../workdays.js";
@@ -126,7 +127,7 @@ export default function Live({ user }) {
         return (
           <div key={m.id} style={{ ...card, marginBottom: 12, borderRight: `4px solid ${p.color}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{m.name[0]}</div>
+              <Avatar member={m} size={34} />
               <div style={{ flex: 1, minWidth: 130 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {m.name}
