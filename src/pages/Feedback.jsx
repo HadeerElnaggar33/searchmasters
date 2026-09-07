@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { inRange } from "../timeFilter.js";
+import TimeBar from "./TimeBar.jsx";
 import { sb, addNotification, MONTHS, CURRENT_MONTH } from "../supabase.js";
 
 const TYPES = {
@@ -7,6 +9,8 @@ const TYPES = {
 };
 
 export default function Feedback({ user }) {
+  const [timeMode, setTimeMode] = useState("30");
+  const [timeCustom, setTimeCustom] = useState({ from: "", to: "" });
   const [members, setMembers] = useState([]);
   const [notes, setNotes] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -96,6 +100,7 @@ export default function Feedback({ user }) {
     if (!isAdmin && n.member_name !== user.name) return false;
     if (isAdmin && filterMember !== "all" && n.member_name !== filterMember) return false;
     if (filterType !== "all" && n.type !== filterType) return false;
+    if (!inRange(n.created_at, timeMode, timeCustom)) return false;
     return true;
   });
 
@@ -159,6 +164,8 @@ export default function Feedback({ user }) {
             </button>
           )}
         </div>
+
+      <TimeBar value={timeMode} custom={timeCustom} onChange={setTimeMode} onCustom={setTimeCustom} count={visible.length} />
       </div>
 
       <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 12, padding: "10px 14px", fontSize: 12, color: "#2563EB", marginBottom: 16, lineHeight: 1.7 }}>
