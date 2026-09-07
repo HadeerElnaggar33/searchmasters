@@ -24,6 +24,7 @@ import Draws, { DrawPopup } from "./pages/Draws.jsx";
 import Live from "./pages/Live.jsx";
 import TabHub from "./pages/TabHub.jsx";
 import Profile from "./pages/Profile.jsx";
+import Training from "./pages/Training.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
 import { heartbeat, activeTimers, stopTimer, fmtClock } from "./timer.js";
@@ -39,7 +40,7 @@ const ITEMS = {
   attendanceTeam:{ icon: "🗓", label: "حضور وساعات الفريق", page: "attendance" },
   projects:      { icon: "📁", label: "المشاريع" },
   team:          { icon: "👥", label: "الفريق" },
-  training:      { icon: "🎓", label: "نتعلم سوا", soon: true },
+  training:      { icon: "🎓", label: "نتعلم سوا" },
   leaves:        { icon: "🏖", label: "الإجازات" },
   feedback:      { icon: "💬", label: "الملاحظات" },
   reports:       { icon: "📊", label: "التقارير" },
@@ -355,6 +356,7 @@ export default function App() {
     mood:       <Mood user={user} onDone={() => setPage("dashboard")} />,
     badges:     <Badges user={user} />,
     profile:    <Profile user={user} />,
+    training:   <Training user={user} />,
     draws:      <Draws user={user} />,
     live:       <Live user={user} />,
     notifications: <Notifications user={user} onOpenItem={n => {
