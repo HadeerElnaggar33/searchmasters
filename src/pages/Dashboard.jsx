@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb, STATUS_CONFIG, PRIORITY_CONFIG, timeAgo, formatDate, CURRENT_MONTH } from "../supabase.js";
 import { loadWorkConfig, isWorkingDay, countWorkingDays } from "../workdays.js";
 import { loadLedger, totalsFrom, rankMembers } from "../score.js";
@@ -602,7 +603,7 @@ export default function Dashboard({ user, onNavigate }) {
                 {needFollow.map(({ m, late, stalled }) => (
                   <button key={m.id} onClick={() => nav("tasks", { overdue: true, assignee: m.name })}
                     style={{ width: "100%", textAlign: "right", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 11px", marginBottom: 5, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+                    <Avatar member={m} size={26} />
                     <span style={{ flex: 1, fontSize: 13, color: "#0F172A" }}>{m.name}</span>
                     <span style={{ fontSize: 11, color: "#DC2626", fontWeight: 700 }}>{late} متأخرة</span>
                     {stalled > 0 && <span style={{ fontSize: 11, color: "#94A3B8" }}>{stalled} واقفة</span>}
@@ -638,7 +639,7 @@ export default function Dashboard({ user, onNavigate }) {
                 return (
                   <div key={n2} style={{ display: "flex", alignItems: "center", gap: 8, background: i === 0 ? "#FFFBEB" : "#F8FAFC", border: `1px solid ${i === 0 ? "#FDE68A" : "#E2E8F0"}`, borderRadius: 10, padding: "7px 11px", marginBottom: 5 }}>
                     <span style={{ fontSize: 13, minWidth: 20 }}>{["🥇","🥈","🥉"][i] || `${i+1}.`}</span>
-                    <div style={{ width: 24, height: 24, borderRadius: "50%", background: (m && m.avatar_color) || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{n2[0]}</div>
+                    <Avatar name={n2} members={members} size={24} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#0F172A" }}>{n2}</span>
                     {nomPct != null && <span style={{ fontSize: 11, color: "#D97706", fontWeight: 700 }}>{nomPct}%</span>}
                     <span style={{ fontSize: 13, fontWeight: 800, color: "#2563EB" }}>{Math.round((totals[n2] || 0) * 10) / 10}</span>
@@ -655,7 +656,7 @@ export default function Dashboard({ user, onNavigate }) {
                   const att = attendance.find(a => a.member_name === m.name);
                   return (
                     <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 7, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "7px 10px" }}>
-                      <div style={{ width: 24, height: 24, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+                      <Avatar member={m} size={24} />
                       <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
                       {att && att.status === "leave"
                         ? <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>🏖</span>
@@ -820,7 +821,7 @@ export default function Dashboard({ user, onNavigate }) {
             const att = attendance.find(a => a.member_name === m.name);
             return (
               <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 7, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "7px 10px" }}>
-                <div style={{ width: 24, height: 24, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
+                <Avatar member={m} size={24} />
                 <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
                 {att && att.status === "leave"
                   ? <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>🏖</span>
