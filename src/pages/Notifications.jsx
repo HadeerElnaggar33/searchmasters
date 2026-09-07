@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import { sb, timeAgo } from "../supabase.js";
+import { sb } from "../supabase.js";
+import { inRange, fullStamp } from "../timeFilter.js";
+import TimeBar from "./TimeBar.jsx";
 
 const TYPE_CONFIG = {
   assign: { icon: "📌", color: "#2563EB", bg: "#EFF6FF", label: "تعيين تاسك" },
@@ -10,6 +12,8 @@ const TYPE_CONFIG = {
 };
 
 export default function Notifications({ user, onOpenItem }) {
+  const [timeMode, setTimeMode] = useState("30");
+  const [timeCustom, setTimeCustom] = useState({ from: "", to: "" });
   const markRead = async n => { if (!n.is_read) await sb(`notifications?id=eq.${n.id}`, "PATCH", { is_read: true }); };
   const [notifs, setNotifs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +40,10 @@ export default function Notifications({ user, onOpenItem }) {
     setNotifs([]);
   }
 
-  const filtered = notifs.filter(n => filter === "all" || n.type === filter);
+  const filtered = notifs.filter(n =>
+    (filter === "all" || n.type === filter) &&
+    inRange(n.created_at, timeMode, timeCustom)
+  );
   const unread = notifs.filter(n => !n.is_read).length;
 
   const groupByDate = (items) => {
@@ -66,6 +73,8 @@ export default function Notifications({ user, onOpenItem }) {
           </button>
         )}
       </div>
+
+      <TimeBar value={timeMode} custom={timeCustom} onChange={setTimeMode} onCustom={setTimeCustom} count={filtered.length} />
 
       {/* Filter tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", background: "#F8FAFC", borderRadius: 12, padding: 4 }}>
@@ -110,7 +119,7 @@ export default function Notifications({ user, onOpenItem }) {
                         <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.5, marginBottom: 4 }}>{n.content}</div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <span style={{ fontSize: 11, background: t.bg, color: t.color, padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{t.label}</span>
-                          <span style={{ fontSize: 11, color: "#94A3B8" }}>{timeAgo(n.created_at)}</span>
+                          <span style={{ fontSize: 11, color: "#94A3B8" }}>{fullStamp(n.created_at)}</span>
                           {!n.is_read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2563EB", display: "inline-block" }}></span>}
                           {n.related_task_id && <span style={{ fontSize: 11, color: "#2563EB", fontWeight: 600 }}>افتحها ←</span>}
                         </div>
