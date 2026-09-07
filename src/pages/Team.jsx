@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb } from "../supabase.js";
 
 const ROLES = [{ v:"admin", l:"Admin" },{ v:"employee", l:"Employee" }];
@@ -102,7 +103,7 @@ export default function Team({ user }) {
           return (
             <div key={m.id} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 18, padding: 18, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
-                <div style={{ width: 50, height: 50, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, flexShrink: 0, color: "#fff" }}>{m.name[0]}</div>
+                <Avatar member={m} size={50} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     {m.name}
