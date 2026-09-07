@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb } from "../supabase.js";
 import { loadWorkConfig, isWorkingDay, dayKind, countWorkingDays, monthBounds } from "../workdays.js";
 
@@ -309,7 +310,7 @@ export default function Attendance({ user }) {
           return (
             <div key={m.id} style={{ borderBottom: "1px solid #F1F5F9" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", flexWrap: "wrap" }}>
-                <div style={{ width: 36, height: 36, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, flexShrink: 0, color: "#fff" }}>{m.name[0]}</div>
+                <Avatar member={m} size={36} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A" }}>{m.name}</div>
                 </div>
