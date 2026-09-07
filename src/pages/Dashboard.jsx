@@ -484,13 +484,14 @@ export default function Dashboard({ user, onNavigate }) {
                   const p = presenceOf(m.last_seen, Number(settings.idle_after_minutes) || 180);
                   const att = attendance.find(a => a.member_name === m.name);
                   return (
-                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 7, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "7px 10px" }}>
+                    <button key={m.id} onClick={() => nav("tasks", { assignee: m.name })}
+                      style={{ display: "flex", alignItems: "center", gap: 7, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "7px 10px", width: "100%", textAlign: "right", cursor: "pointer" }}>
                       <span style={{ fontSize: 11 }}>{p.icon}</span>
                       <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
                       <span style={{ fontSize: 10, color: p.color, fontWeight: 700 }}>
                         {att && att.status === "leave" ? "🏖 إجازة" : p.label}
                       </span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -509,19 +510,20 @@ export default function Dashboard({ user, onNavigate }) {
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{r.member_name} · {r.days} يوم</div>
                       <div style={{ fontSize: 11, color: "#94A3B8" }}>{formatDate(String(r.start_date).slice(0,10))} · {r.reason}</div>
                     </div>
-                    <button onClick={() => decideLeave(r, true)} disabled={busy} style={{ background: "#059669", color: "#fff", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>اعتماد</button>
-                    <button onClick={() => decideLeave(r, false)} disabled={busy} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>رفض</button>
+                    <button onClick={e => { e.stopPropagation(); decideLeave(r, true); }} disabled={busy} style={{ background: "#059669", color: "#fff", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>اعتماد</button>
+                    <button onClick={e => { e.stopPropagation(); decideLeave(r, false); }} disabled={busy} style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>رفض</button>
                   </div>
                 ))}
                 {tReview.map(t => (
-                  <div key={t.id} style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "9px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div key={t.id} onClick={() => nav("tasks", { openTask: t.id })}
+                    style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "9px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", cursor: "pointer" }}>
                     <span style={{ fontSize: 14 }}>👀</span>
                     <div style={{ flex: 1, minWidth: 130 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{t.title}</div>
                       <div style={{ fontSize: 11, color: "#94A3B8" }}>{t.assigned_to}</div>
                     </div>
-                    <button onClick={() => decideTask(t, true)} disabled={busy} style={{ background: "#059669", color: "#fff", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>اعتماد</button>
-                    <button onClick={() => decideTask(t, false)} disabled={busy} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>للتعديل</button>
+                    <button onClick={e => { e.stopPropagation(); decideTask(t, true); }} disabled={busy} style={{ background: "#059669", color: "#fff", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>اعتماد</button>
+                    <button onClick={e => { e.stopPropagation(); decideTask(t, false); }} disabled={busy} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#D97706", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>للتعديل</button>
                   </div>
                 ))}
               </div>
@@ -548,7 +550,7 @@ export default function Dashboard({ user, onNavigate }) {
               <div style={{ ...C.card, marginBottom: 16, borderRight: "3px solid #DC2626" }}>
                 <div style={{ fontSize: 14, ...C.heading, marginBottom: 10 }}>🔴 مين محتاج متابعة</div>
                 {needFollow.map(({ m, late, stalled }) => (
-                  <button key={m.id} onClick={() => nav("tasks", { overdue: true })}
+                  <button key={m.id} onClick={() => nav("tasks", { overdue: true, assignee: m.name })}
                     style={{ width: "100%", textAlign: "right", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: "8px 11px", marginBottom: 5, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                     <div style={{ width: 26, height: 26, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{m.name[0]}</div>
                     <span style={{ flex: 1, fontSize: 13, color: "#0F172A" }}>{m.name}</span>
