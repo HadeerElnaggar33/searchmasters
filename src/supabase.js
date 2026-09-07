@@ -2,6 +2,9 @@ const URL = "https://qmucvkzzpeblpkbsgpwd.supabase.co";
 const KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFtdWN2a3p6cGVibHBrYnNncHdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0MjI5NjQsImV4cCI6MjEwMTk5ODk2NH0.QNW2_d70XZ_PpNQZvUJOuxSvr7FkZbSpmBPDMmjfYH8";
 const H = { "apikey": KEY, "Authorization": `Bearer ${KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
 
+export const SB_URL = URL;
+export const SB_KEY = KEY;
+
 export async function sb(path, method = "GET", body = null) {
   try {
     const res = await fetch(`${URL}/rest/v1/${path}`, { method, headers: H, body: body ? JSON.stringify(body) : null });
