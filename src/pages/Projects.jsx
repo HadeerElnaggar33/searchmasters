@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { IMPORTANCE, KINDS, expectedMonthly, projectAlerts, sortProjects } from "../projects.js";
+import ProjectMetaFields from "./ProjectMetaFields.jsx";
 import { sb, RESOURCE_TYPES } from "../supabase.js";
 
 const PROJECT_TYPES = [
@@ -27,10 +29,14 @@ export default function Projects({ user }) {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [sortMode, setSortMode] = useState(() => { try { return localStorage.getItem("sm_proj_sort") || "importance"; } catch (e) { return "importance"; } });
+  const [tasks, setTasks] = useState([]);
+  const [cfg, setCfg] = useState({});
+  const [dragId, setDragId] = useState(null);
   const [loading, setLoading] = useState(true);
   const isAdmin = user.role === "admin" || user.role === "team_leader";
 
-  const emptyForm = { name: "", client_name: "", website_url: "", project_type: [], status: "active", description: "", team_members: [], color: "#2563EB" };
+  const emptyForm = { name: "", client_name: "", website_url: "", project_type: [], status: "active", description: "", team_members: [], color: "#2563EB", importance: "normal", kind: "client", expected_monthly: "" };
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
   const [resForm, setResForm] = useState({ name: "", url: "", type: "drive" });
@@ -40,10 +46,43 @@ export default function Projects({ user }) {
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const [p, m] = await Promise.all([sb("projects?order=created_at.desc"), sb("team_members?is_active=eq.true&order=name")]);
+    const [p, m, t, st] = await Promise.all([
+      sb("projects?order=sort_order"),
+      sb("team_members?is_active=eq.true&order=name"),
+      sb("tasks?select=project_id,status,created_at,due_date"),
+      sb("app_settings?select=key,value"),
+    ]);
     if (p) setProjects(p);
     if (m) setMembers(m);
+    if (t) setTasks(t);
+    if (st) { const o = {}; st.forEach(x => { o[x.key] = x.value; }); setCfg(o); }
     setLoading(false);
+  }
+
+  // ── التثبيت والترتيب (تعديل ٣٩) ──
+  async function togglePin(proj) {
+    await sb(`projects?id=eq.${proj.id}`, "PATCH", { is_pinned: !proj.is_pinned });
+    setProjects(list => list.map(x => x.id === proj.id ? { ...x, is_pinned: !proj.is_pinned } : x));
+  }
+
+  function pickSort(v) {
+    setSortMode(v);
+    try { localStorage.setItem("sm_proj_sort", v); } catch (e) { /* */ }
+  }
+
+  async function onDrop(targetId) {
+    if (!dragId || dragId === targetId || sortMode !== "manual") { setDragId(null); return; }
+    const ordered = sortProjects(projects, "manual", tasks);
+    const from = ordered.findIndex(x => String(x.id) === String(dragId));
+    const to = ordered.findIndex(x => String(x.id) === String(targetId));
+    if (from < 0 || to < 0) { setDragId(null); return; }
+    const moved = ordered.splice(from, 1)[0];
+    ordered.splice(to, 0, moved);
+    for (let i = 0; i < ordered.length; i++) {
+      await sb(`projects?id=eq.${ordered[i].id}`, "PATCH", { sort_order: i });
+    }
+    setDragId(null);
+    await loadAll();
   }
 
   async function openProject(proj) {
@@ -54,7 +93,11 @@ export default function Projects({ user }) {
 
   async function addProject() {
     if (!form.name.trim()) return;
-    await sb("projects", "POST", { ...form, project_type: parseTypes(form.project_type).join(", ") || null });
+    await sb("projects", "POST", {
+      ...form,
+      project_type: parseTypes(form.project_type).join(", ") || null,
+      expected_monthly: form.expected_monthly === "" ? null : Number(form.expected_monthly),
+    });
     await loadAll();
     setShowAdd(false);
     setForm(emptyForm);
@@ -67,6 +110,9 @@ export default function Projects({ user }) {
       website_url: editForm.website_url, project_type: parseTypes(editForm.project_type).join(", ") || null,
       status: editForm.status, description: editForm.description,
       team_members: editForm.team_members, color: editForm.color,
+      importance: editForm.importance || "normal",
+      kind: editForm.kind || "client",
+      expected_monthly: editForm.expected_monthly === "" || editForm.expected_monthly == null ? null : Number(editForm.expected_monthly),
     });
     await loadAll();
     // refresh selected if open
@@ -255,6 +301,8 @@ export default function Projects({ user }) {
                   <input value={editForm.website_url} onChange={e => setEditForm(f => ({ ...f, website_url: e.target.value }))} placeholder="رابط الموقع" style={{ ...inp, direction: "ltr" }} />
                   <div>
                     <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>الحالة</div>
+
+                    <ProjectMetaFields value={editForm} onChange={setEditForm} inp={inp} />
                     <select value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))} style={inp}>
                       {PROJECT_STATUSES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
                     </select>
@@ -302,10 +350,21 @@ export default function Projects({ user }) {
     return true;
   });
 
+  const sorted = sortProjects(filtered, sortMode, tasks);
+  const pinnedList = sorted.filter(p => p.is_pinned);
+  const restList = sorted.filter(p => !p.is_pinned);
+
   return (
     <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0F172A" }}>📁 المشاريع</h2>
+        <select value={sortMode} onChange={e => pickSort(e.target.value)}
+          style={{ ...inp, width: "auto", padding: "8px 10px", fontSize: 12 }}>
+          <option value="importance">ترتيب: الأهمية</option>
+          <option value="active">ترتيب: الأكثر نشاطاً</option>
+          <option value="name">ترتيب: الاسم</option>
+          {isAdmin && <option value="manual">ترتيب: يدوي (سحب وإفلات)</option>}
+        </select>
         {isAdmin && <button onClick={() => { setForm(emptyForm); setShowAdd(true); }} style={{ background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: "8px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>+ مشروع جديد</button>}
       </div>
 
@@ -332,10 +391,39 @@ export default function Projects({ user }) {
       {filtered.length === 0
         ? <div style={{ textAlign: "center", padding: 60, color: "#94A3B8" }}>{projects.length === 0 ? "📭 لا توجد مشاريع بعد" : "🔎 مفيش مشاريع مطابقة للفلاتر"}</div>
         : <div style={{ display: "grid", gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(2,1fr)", gap: 14 }}>
-            {filtered.map(p => {
+            {pinnedList.length > 0 && (
+              <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 800, color: "#D97706", padding: "2px 4px" }}>
+                📌 مشاريع مثبتة ({pinnedList.length})
+              </div>
+            )}
+            {[...pinnedList, ...restList].map((p, pi) => {
+              const isFirstRest = pinnedList.length > 0 && pi === pinnedList.length;
               const statusConf = PROJECT_STATUSES.find(s => s.v === p.status) || PROJECT_STATUSES[0];
+              const imp = IMPORTANCE[p.importance || "normal"];
+              const alerts = (cfg.feature_project_alerts !== "0") ? projectAlerts(p, tasks, cfg) : [];
+              const exp = expectedMonthly(p, tasks);
+              const openN = tasks.filter(t => String(t.project_id) === String(p.id) && t.status !== "completed" && t.status !== "cancelled").length;
               return (
-                <div key={p.id} onClick={() => openProject(p)} style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 18, padding: 18, cursor: "pointer", borderTop: `3px solid ${p.color || "#2563EB"}`, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+                <>
+                {isFirstRest && (
+                  <div key="sep" style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 800, color: "#94A3B8", padding: "8px 4px 2px" }}>
+                    باقي المشاريع ({restList.length})
+                  </div>
+                )}
+                <div key={p.id} onClick={() => openProject(p)}
+                  draggable={isAdmin && sortMode === "manual"}
+                  onDragStart={() => setDragId(p.id)}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={() => onDrop(p.id)}
+                  style={{ background: "#FFFFFF", border: `1px solid ${p.is_pinned ? "#FDE68A" : "#E2E8F0"}`, borderRadius: 18, padding: 18, cursor: "pointer", borderTop: `3px solid ${p.color || "#2563EB"}`, boxShadow: "0 1px 4px rgba(15,23,42,0.06)", position: "relative", opacity: dragId === p.id ? 0.5 : 1 }}>
+
+                  {isAdmin && (
+                    <button onClick={e => { e.stopPropagation(); togglePin(p); }}
+                      title={p.is_pinned ? "شيل التثبيت" : "ثبّت المشروع للفريق كله"}
+                      style={{ position: "absolute", left: 10, top: 10, background: "none", color: p.is_pinned ? "#D97706" : "#CBD5E1", fontSize: 15 }}>
+                      {p.is_pinned ? "📌" : "📍"}
+                    </button>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
                     <div style={{ width: 44, height: 44, borderRadius: 12, background: p.color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>🚀</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -343,6 +431,28 @@ export default function Projects({ user }) {
                       {p.client_name && <div style={{ fontSize: 12, color: "#94A3B8" }}>{p.client_name}</div>}
                     </div>
                     <span style={{ fontSize: 11, background: `${statusConf.c}15`, color: statusConf.c, padding: "2px 8px", borderRadius: 6, fontWeight: 600, flexShrink: 0 }}>{statusConf.l}</span>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                    <span style={{ fontSize: 10, background: imp.bg, color: imp.color, border: `1px solid ${imp.border}`, padding: "2px 9px", borderRadius: 20, fontWeight: 700 }}>
+                      أهمية {imp.l}
+                    </span>
+                    <span style={{ fontSize: 10, background: "#F8FAFC", color: "#64748B", border: "1px solid #E2E8F0", padding: "2px 9px", borderRadius: 20 }}>
+                      {(KINDS[p.kind || "client"] || KINDS.client).icon} {(KINDS[p.kind || "client"] || KINDS.client).l}
+                    </span>
+                    {exp.value > 0 && (
+                      <span style={{ fontSize: 10, background: "#F8FAFC", color: "#64748B", border: "1px solid #E2E8F0", padding: "2px 9px", borderRadius: 20 }}>
+                        متوقع {exp.value}/شهر{exp.manual ? " ✏️" : ""}
+                      </span>
+                    )}
+                    <span style={{ fontSize: 10, background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", padding: "2px 9px", borderRadius: 20 }}>
+                      {openN} مفتوحة
+                    </span>
+                    {alerts.map((a, i) => (
+                      <span key={i} style={{ fontSize: 10, background: a.bg, color: a.color, border: `1px solid ${a.color}33`, padding: "2px 9px", borderRadius: 20, fontWeight: 700 }}>
+                        {a.type === "new" ? "🆕" : a.type === "idle" ? "⏸" : "⚠️"} {a.label}
+                      </span>
+                    ))}
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {parseTypes(p.project_type).map(t => (
@@ -352,6 +462,7 @@ export default function Projects({ user }) {
                     {p.team_members?.length > 0 && <span style={{ fontSize: 11, color: "#94A3B8" }}>👥 {p.team_members.length} أشخاص</span>}
                   </div>
                 </div>
+                </>
               );
             })}
           </div>
@@ -370,6 +481,8 @@ export default function Projects({ user }) {
                 <input value={form.website_url} onChange={e => setForm(f => ({ ...f, website_url: e.target.value }))} placeholder="رابط الموقع" style={{ ...inp, direction: "ltr" }} />
                 <div>
                   <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>الحالة</div>
+
+                  <ProjectMetaFields value={form} onChange={setForm} inp={inp} />
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inp}>
                     {PROJECT_STATUSES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
                   </select>
