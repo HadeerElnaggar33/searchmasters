@@ -14,12 +14,14 @@ function isOnTask(task, name) {
 export default function Reports({ user }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
+  // تقارير العملاء: المشاريع الداخلية مستبعدة (تعديل ٤١)
   const [members, setMembers] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[new Date().getMonth()] + " " + new Date().getFullYear());
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("overview");
   const [clientProject, setClientProject] = useState("");
   const [copied, setCopied] = useState(false);
+  const clientProjects = projects.filter(p => (p.kind || "client") !== "internal");
 
   useEffect(() => { loadAll(); }, [selectedMonth]);
 
@@ -120,7 +122,7 @@ export default function Reports({ user }) {
           {/* By Project */}
           {view === "by_project" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {projects.map(proj => {
+              {clientProjects.map(proj => {
                 const pt = tasks.filter(t => t.project_id === proj.id);
                 if (pt.length === 0) return null;
                 const done = pt.filter(t => t.status === "completed").length;
@@ -221,7 +223,7 @@ export default function Reports({ user }) {
 
                 <select value={clientProject} onChange={e => setClientProject(e.target.value)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(99,102,241,0.25)", color: "#083793", padding: "10px 12px", borderRadius: 10, fontSize: 14, outline: "none", direction: "rtl", width: "100%", marginBottom: 16 }}>
                   <option value="">— اختاري العميل —</option>
-                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {clientProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
 
                 {!proj ? (
