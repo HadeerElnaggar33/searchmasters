@@ -509,6 +509,21 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     }
   }
 
+  // ═══ إنهاء التاسك مباشرة من غير مراجعة ═══
+  async function finishDirect(task) {
+    if (timer && String(timer.task_id) === String(task.id)) { await stopTimer(user.name); setTimer(null); }
+    const hadTime = await taskHasTime(task.id);
+    if (!hadTime && task.assigned_to === user.name) await noticeClosedWithoutTime(task, user.name);
+
+    const updates = { status: "completed", completed_at: new Date().toISOString() };
+    await sb(`tasks?id=eq.${task.id}`, "PATCH", updates);
+    await addHistory(task.id, "completed", user.name, "اتقفلت مباشرة من غير مراجعة");
+    await awardTaskPoints(task);
+    patchTask(task.id, updates);
+    if (task.parent_task_id) setTimeout(() => syncParent(task.parent_task_id), 500);
+    setShowDetail(null);
+  }
+
   // ═══ دورة المراجعة (تعديل ٤) ═══
   function parseReviewers(v) {
     if (!v) return [];
@@ -990,7 +1005,15 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
 
   async function submitComment() {
     if (!newComment.trim() || !showDetail) return;
-    await sb("task_comments", "POST", { task_id: showDetail.id, content: newComment, author: user.name });
+    const body = newComment;
+    await sb("task_comments", "POST", { task_id: showDetail.id, content: body, author: user.name });
+    // منشن: أي @اسم في التعليق بيوصله إشعار
+    for (const m of members) {
+      if (m.name === user.name) continue;
+      if (body.includes("@" + m.name)) {
+        await addNotification(m.name, `💬 ${user.name} عملك منشن في «${showDetail.title}»: ${body.slice(0, 70)}`, "info", showDetail.id);
+      }
+    }
     await addHistory(showDetail.id, "commented", user.name, newComment.slice(0,50));
     setNewComment(""); openDetail(showDetail);
   }
@@ -1004,6 +1027,10 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     if (dayView === "all") return true;
     if (dayView === "kitchen") return isKitchen(t);
     if (dayView === "late") return isLate(t);
+    if (dayView === "past") {
+      const d = t.due_date ? String(t.due_date).slice(0, 10) : null;
+      return !!d && d < today;
+    }
     if (isKitchen(t)) return false;              // المطبخ ميظهرش في باقي الفلاتر
     const d = t.due_date ? String(t.due_date).slice(0, 10) : null;
     if (dayView === "today")    return d === today && !isLate(t);
@@ -1138,6 +1165,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
         const c = {
           kitchen:  baseFiltered.filter(isKitchen).length,
           late:     baseFiltered.filter(isLate).length,
+          past:     baseFiltered.filter(t => t.due_date && String(t.due_date).slice(0,10) < today).length,
           today:    baseFiltered.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === today && !isLate(t)).length,
           tomorrow: baseFiltered.filter(t => !isKitchen(t) && String(t.due_date||"").slice(0,10) === tomorrowStr).length,
           week:     baseFiltered.filter(t => !isKitchen(t) && t.due_date && String(t.due_date).slice(0,10) >= today && String(t.due_date).slice(0,10) <= weekEndStr).length,
@@ -1146,6 +1174,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
         const BTNS = [
           ["kitchen",  "🍳 المطبخ",  "#D97706", "#FFFBEB"],
           ["late",     "🔴 متأخر",   "#DC2626", "#FEF2F2"],
+          ["past",     "⏪ اللي فات", "#7C3AED", "#F5F3FF"],
           ["today",    "النهارده",   "#2563EB", "#EFF6FF"],
           ["tomorrow", "بكرا",       "#7C3AED", "#F5F3FF"],
           ["week",     "الأسبوع ده", "#0891B2", "#ECFEFF"],
@@ -1515,6 +1544,12 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                         <button onClick={() => revertToTodo(showDetail)}
                           style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
                           ↩️ رجّعها «لم تبدأ»
+                        </button>
+                      )}
+                      {showDetail.status !== "completed" && showDetail.status !== "cancelled" && canEdit && (
+                        <button onClick={() => finishDirect(showDetail)}
+                          style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+                          ✅ إنهاء التاسك
                         </button>
                       )}
                       {(showDetail.status === "in_progress" || showDetail.status === "needs_revision") && showDetail.assigned_to === user.name && (
@@ -1898,13 +1933,28 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                       {comments.map(c => (
                         <div key={c.id} style={{ background: c.author === user.name ? "#EFF6FF" : "#F8FAFC", borderRadius: 10, padding: "8px 12px", borderRight: c.author === user.name ? "3px solid #2563EB" : "3px solid #E2E8F0" }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: "#2563EB", marginBottom: 3 }}>{c.author}</div>
-                          <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.5 }}>{c.content}</div>
+                          <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.5 }}>
+                            {String(c.content || "").split(/(@[^\s]+)/g).map((part, i) =>
+                              part.startsWith("@")
+                                ? <span key={i} style={{ color: "#7C3AED", fontWeight: 700, background: "#F5F3FF", borderRadius: 4, padding: "0 3px" }}>{part}</span>
+                                : <span key={i}>{part}</span>
+                            )}
+                          </div>
                         </div>
                       ))}
                       {comments.length === 0 && <div style={{ fontSize: 13, color: "#94A3B8" }}>لا توجد تعليقات بعد</div>}
                     </div>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 7 }}>
+                      <span style={{ fontSize: 11, color: "#94A3B8", alignSelf: "center" }}>منشن:</span>
+                      {members.filter(m => m.name !== user.name).map(m => (
+                        <button key={m.id} onClick={() => setNewComment(v => (v ? v + " " : "") + "@" + m.name + " ")}
+                          style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#7C3AED", padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                          @{m.name}
+                        </button>
+                      ))}
+                    </div>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === "Enter" && submitComment()} placeholder="اكتب تعليق..." style={{ ...inp, flex: 1, padding: "8px 12px", fontSize: 13 }} />
+                      <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === "Enter" && submitComment()} placeholder="اكتب تعليق... واستخدم @ لمنشن حد" style={{ ...inp, flex: 1, padding: "8px 12px", fontSize: 13 }} />
                       <button onClick={submitComment} style={{ background: "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: "8px 14px", borderRadius: 10, fontSize: 13, fontWeight: 600 }}>إرسال</button>
                     </div>
                   </div>
