@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { inRange } from "../timeFilter.js";
+import TimeBar from "./TimeBar.jsx";
 import { sb, MONTHS, CURRENT_MONTH, formatDate, addNotification } from "../supabase.js";
 import { SCORE, SOURCE_LABEL, addScore, replaceTaskScore, replaceScoreByRef, loadLedger, totalsFrom, rankMembers, loadPointsConfig, DEFAULT_PTS } from "../score.js";
 import { loadWorkConfig, isWorkingDay } from "../workdays.js";
@@ -31,6 +33,8 @@ const OPPORTUNITIES = [
 ];
 
 export default function Score({ user }) {
+  const [timeMode, setTimeMode] = useState("month");
+  const [timeCustom, setTimeCustom] = useState({ from: "", to: "" });
   const [members, setMembers] = useState([]);
   const [ledger, setLedger] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -104,7 +108,7 @@ export default function Score({ user }) {
   const myTotal = totals[user.name] || 0;
 
   function movesOf(name) {
-    return ledger.filter(r => r.member_name === name);
+    return ledger.filter(r => r.member_name === name && inRange(r.created_at, timeMode, timeCustom));
   }
 
   // مجموعة حركات كل يوم
@@ -302,6 +306,8 @@ export default function Score({ user }) {
       )}
 
       {/* ═══════════ رصيدي ═══════════ */}
+      <TimeBar value={timeMode} custom={timeCustom} onChange={setTimeMode} onCustom={setTimeCustom} />
+
       {view === "me" && (
         <>
           <div style={{ ...card, borderTop: "4px solid #2563EB", textAlign: "center" }}>
