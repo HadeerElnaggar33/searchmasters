@@ -174,6 +174,19 @@ export default function App() {
     await loadWork();
   }
 
+  // الرجوع للشغل بعد ما اتقفل اليوم بالغلط أو عشان استكمال
+  async function reopenWork() {
+    if (!work.record || workBusy) return;
+    setWorkBusy(true);
+    const now = new Date().toISOString();
+    await sb(`attendance?id=eq.${work.record.id}`, "PATCH", { clock_out: null });
+    await sb("attendance_sessions", "POST", {
+      attendance_id: work.record.id, member_name: user.name, date: todayStr, start_time: now, type: "work",
+    });
+    setWorkBusy(false);
+    await loadWork();
+  }
+
   async function endWork() {
     if (!work.record || workBusy) return;
     setWorkBusy(true);
@@ -617,9 +630,14 @@ export default function App() {
             }
             if (ended) {
               return (
-                <span title="خلصت شغل النهاردة" style={{ fontSize: 11, color: "#059669", background: "#ECFDF5", border: "1px solid #A7F3D0", padding: "5px 11px", borderRadius: 20, fontWeight: 700 }}>
-                  ✅ {fmtClock(work.doneMins * 60)}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 20, padding: isMobile ? "3px 7px" : "4px 10px" }}>
+                  <span style={{ fontSize: 12 }}>✅</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: "#059669", fontVariantNumeric: "tabular-nums" }}>{fmtClock(work.doneMins * 60)}</span>
+                  <button onClick={reopenWork} disabled={workBusy} title="ارجع للشغل"
+                    style={{ background: "#2563EB", color: "#fff", padding: "3px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+                    ▶ ارجع
+                  </button>
+                </div>
               );
             }
             return (
