@@ -86,6 +86,14 @@ export default function Templates({ user }) {
     setTForm({ name: "", description: "", tasks: [{ title: "", task_type: "Keyword Research", priority: "medium" }], frequency: "none", days_of_week: [], day_of_month: 1 });
   }
 
+  async function toggleTemplate(t) {
+    const on = t.is_active === false;   // كان مقفول → هيتفتح
+    await sb(`task_templates?id=eq.${t.id}`, "PATCH", { is_active: on });
+    // التكرارات المولّدة من القالب ده بتتوقف معاه
+    await sb(`recurring_tasks?template_id=eq.${encodeURIComponent(String(t.id))}`, "PATCH", { is_active: on });
+    await loadAll();
+  }
+
   function openEditTemplate(t) {
     setEditTemplate(t);
     setTForm({
@@ -242,6 +250,9 @@ export default function Templates({ user }) {
                     <div>
                       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>📝 {t.name}</div>
                       {t.description && <div style={{ fontSize: 12, color: "#9CA3AF" }}>{t.description} · {(t.tasks || []).length} تاسكات</div>}
+                      {t.is_active === false && (
+                        <div style={{ fontSize: 11, color: "#FCA5A5", marginTop: 3 }}>⏸ مقفول — مش بيولّد تاسكات جديدة</div>
+                      )}
                       {t.frequency && t.frequency !== "none" && (
                         <div style={{ fontSize: 11, color: "#FCD34D", marginTop: 3 }}>
                           🔄 {t.frequency === "daily" ? "يومي" : t.frequency === "weekly" ? "أسبوعي" : "شهري"}
@@ -256,6 +267,13 @@ export default function Templates({ user }) {
                       {isAdmin && <button onClick={() => { setShowApply(t); setApplyForm({ project_id: "", assigned_to: "", month: CURRENT_MONTH, due_date: "" }); }} style={{ background: "rgba(99,102,241,0.2)", color: "#A5B4FC", padding: "6px 12px", borderRadius: 8, fontSize: 12 }}>تطبيق</button>}
                       {isAdmin && <button onClick={() => { setRecurForm({ assignee: "", project_id: "" }); setRecurOpen(t); }} style={{ background: "rgba(217,119,6,0.18)", color: "#FCD34D", padding: "6px 12px", borderRadius: 8, fontSize: 12 }}>🔄 تكرار</button>}
                       {isAdmin && <button onClick={() => openEditTemplate(t)} style={{ background: "rgba(255,255,255,0.06)", color: "#A5B4FC", padding: "6px 10px", borderRadius: 8, fontSize: 12 }}>✏️</button>}
+                      {isAdmin && (
+                        <button onClick={() => toggleTemplate(t)}
+                          title={t.is_active === false ? "شغّلي القالب" : "قفلي القالب — التاسكات المولّدة قبل كده مش هتتأثر"}
+                          style={{ background: t.is_active === false ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)", color: t.is_active === false ? "#FCA5A5" : "#6EE7B7", padding: "6px 13px", borderRadius: 8, fontSize: 12, fontWeight: 800 }}>
+                          {t.is_active === false ? "Off" : "On"}
+                        </button>
+                      )}
                       {isAdmin && <button onClick={() => deleteTemplate(t.id)} style={{ background: "rgba(239,68,68,0.1)", color: "#FCA5A5", padding: "6px 10px", borderRadius: 8, fontSize: 12 }}>🗑</button>}
                     </div>
                   </div>
