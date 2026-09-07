@@ -8,6 +8,7 @@ import { GRADES, IMPACT, medalPoints } from "../badges.js";
 import { loadStickers, pickSticker } from "../stickers.js";
 import { labelList } from "../utils/linkLabel.js";
 import Stars from "../utils/Stars.jsx";
+import RichText from "../utils/RichText.jsx";
 
 // الأنواع بتتحمّل من قاعدة البيانات · دي احتياطي لو الجدول لسه مااتعملش
 const FALLBACK_TYPES = [
@@ -111,6 +112,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
   const [helpForm, setHelpForm] = useState({ helper: "", reason: "" });
   const [helpReqs, setHelpReqs] = useState([]);
   const [savingHelp, setSavingHelp] = useState(false);
+  const [noteAdd, setNoteAdd] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const [blockOpen, setBlockOpen] = useState(null);
   const [blockForm, setBlockForm] = useState({ reason: "", waiting_on: "", blocked_by: "" });
   const [savingBlock, setSavingBlock] = useState(false);
@@ -507,6 +510,27 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
         allDone ? "كل البنود خلصت — الأب اتقفل" : "بند اتفتح تاني — الأب رجع جاري");
       patchTask(parentId, { status: target });
     }
+  }
+
+  // ═══ إضافة ملاحظة على تاسك موجودة ═══
+  async function appendNote() {
+    const body = noteAdd.trim();
+    if (!body || !showDetail) return;
+    setSavingNote(true);
+    const merged = (showDetail.notes ? showDetail.notes + "\n" : "") + body;
+    await sb(`tasks?id=eq.${showDetail.id}`, "PATCH", { notes: merged });
+    await addHistory(showDetail.id, "note_added", user.name, body.slice(0, 80));
+
+    for (const m of members) {
+      if (m.name === user.name) continue;
+      if (body.includes("@" + m.name)) {
+        await addNotification(m.name, `📝 ${user.name} عملك منشن في ملاحظات «${showDetail.title}»: ${body.slice(0, 70)}`, "info", showDetail.id);
+      }
+    }
+
+    setSavingNote(false);
+    setNoteAdd("");
+    patchTask(showDetail.id, { notes: merged });
   }
 
   // ═══ إنهاء التاسك مباشرة من غير مراجعة ═══
@@ -1497,15 +1521,41 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                     {showDetail.shift_count > 0 && <span style={{ fontSize: 12, color: "#D97706" }}>⏩ أُجّل {showDetail.shift_count}x</span>}
                   </div>
 
-                  {/* Notes as bullet list */}
-                  {showDetail.notes && (
-                    <div style={{ background: "#F8FAFC", borderRadius: 12, padding: "12px 16px", marginBottom: 14, border: "1px solid #E2E8F0" }}>
-                      {showDetail.notes.split("\n").filter(l => l.trim()).map((line, i) => (
-                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
-                          <span style={{ color: "#2563EB", fontWeight: 800, flexShrink: 0, fontSize: 16, lineHeight: 1.4 }}>•</span>
-                          <span style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.6 }}>{line.replace(/^[•\-\*]\s*/, "").trim()}</span>
+                  {/* الملاحظات — روابط قابلة للضغط ومنشن ملوّن */}
+                  {(showDetail.notes || canEdit) && (
+                    <div style={{ background: "#F8FAFC", borderRadius: 12, padding: "12px 14px", marginBottom: 14, border: "1px solid #E2E8F0" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", marginBottom: 8 }}>📝 الملاحظات</div>
+
+                      {showDetail.notes
+                        ? <RichText text={showDetail.notes} members={members} />
+                        : <div style={{ fontSize: 12, color: "#94A3B8" }}>مفيش ملاحظات لسه</div>}
+
+                      {canEdit && (
+                        <div style={{ marginTop: 12, borderTop: "1px solid #E2E8F0", paddingTop: 10 }}>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
+                            <span style={{ fontSize: 11, color: "#94A3B8", alignSelf: "center" }}>منشن:</span>
+                            {members.filter(m => m.name !== user.name).map(m => (
+                              <button key={m.id} onClick={() => setNoteAdd(v => (v ? v + " " : "") + "@" + m.name + " ")}
+                                style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#7C3AED", padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                                @{m.name}
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <input value={noteAdd} onChange={e => setNoteAdd(e.target.value)}
+                              onKeyDown={e => e.key === "Enter" && appendNote()}
+                              placeholder="ضيفي ملاحظة أو رابط..."
+                              style={{ ...inp, flex: 1, padding: "8px 12px", fontSize: 13, background: "#FFFFFF" }} />
+                            <button onClick={appendNote} disabled={savingNote || !noteAdd.trim()}
+                              style={{ background: (savingNote || !noteAdd.trim()) ? "#CBD5E1" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: "8px 14px", borderRadius: 10, fontSize: 13, fontWeight: 600 }}>
+                              إضافة
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 5 }}>
+                            الروابط بتبقى قابلة للضغط لوحدها · والمنشن بيوصله إشعار
+                          </div>
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
 
@@ -1946,13 +1996,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                       {comments.map(c => (
                         <div key={c.id} style={{ background: c.author === user.name ? "#EFF6FF" : "#F8FAFC", borderRadius: 10, padding: "8px 12px", borderRight: c.author === user.name ? "3px solid #2563EB" : "3px solid #E2E8F0" }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: "#2563EB", marginBottom: 3 }}>{c.author}</div>
-                          <div style={{ fontSize: 13, color: "#0F172A", lineHeight: 1.5 }}>
-                            {String(c.content || "").split(/(@[^\s]+)/g).map((part, i) =>
-                              part.startsWith("@")
-                                ? <span key={i} style={{ color: "#7C3AED", fontWeight: 700, background: "#F5F3FF", borderRadius: 4, padding: "0 3px" }}>{part}</span>
-                                : <span key={i}>{part}</span>
-                            )}
-                          </div>
+                          <RichText text={c.content} members={members} />
                         </div>
                       ))}
                       {comments.length === 0 && <div style={{ fontSize: 13, color: "#94A3B8" }}>لا توجد تعليقات بعد</div>}
