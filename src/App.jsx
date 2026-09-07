@@ -23,6 +23,7 @@ import Badges from "./pages/Badges.jsx";
 import Draws, { DrawPopup } from "./pages/Draws.jsx";
 import Live from "./pages/Live.jsx";
 import TabHub from "./pages/TabHub.jsx";
+import Profile from "./pages/Profile.jsx";
 import { runRecurringEngine } from "./recurring.js";
 import { runMotivation } from "./motivation.js";
 import { heartbeat, activeTimers, stopTimer, fmtClock } from "./timer.js";
@@ -31,6 +32,7 @@ const ITEMS = {
   dashboard:     { icon: "🏠", label: "الرئيسية" },
   mood:          { icon: "☀️", label: "مودك النهارده" },
   notifications: { icon: "🔔", label: "الإشعارات" },
+  profile:       { icon: "👤", label: "بروفايلي" },
   tasks:         { icon: "📋", label: "التاسكات" },
   attendance:    { icon: "⏰", label: "الحضور والساعات" },
   attendanceMe:  { icon: "⏰", label: "حضوري وساعاتي", page: "attendance" },
@@ -52,7 +54,7 @@ const ITEMS = {
 const NAV_ADMIN = [
   { title: "يومك",           items: ["mood", "notifications", "tasks", "attendanceMe"] },
   { title: "ورشة الشغل",     items: ["projects", "team", "training"] },
-  { title: "دفتر الفريق",    items: ["attendanceTeam", "leaves", "feedback"] },
+  { title: "دفتر الفريق",    items: ["profile", "attendanceTeam", "leaves", "feedback"] },
   { title: "حصاد الشهر",     items: ["reports", "seo"] },
   { title: "شنطة الجوايز",   items: ["score", "eom", "draws"] },
   { title: "غرفة العمليات",  items: ["settings"] },
@@ -61,7 +63,7 @@ const NAV_ADMIN = [
 // أقسام العضو
 const NAV_MEMBER = [
   { title: "يومك",         items: ["mood", "notifications", "tasks"] },
-  { title: "بتاعي أنا",    items: ["attendance", "leaves", "feedback"] },
+  { title: "بتاعي أنا",    items: ["profile", "attendance", "leaves", "feedback"] },
   { title: "شنطة الجوايز", items: ["score", "eom", "draws"] },
   { title: "شغلي",         items: ["projects", "training"] },
   { title: "حصاد الشهر",   items: ["reports", "seo"] },
@@ -352,6 +354,7 @@ export default function App() {
     ]} />,
     mood:       <Mood user={user} onDone={() => setPage("dashboard")} />,
     badges:     <Badges user={user} />,
+    profile:    <Profile user={user} />,
     draws:      <Draws user={user} />,
     live:       <Live user={user} />,
     notifications: <Notifications user={user} onOpenItem={n => {
