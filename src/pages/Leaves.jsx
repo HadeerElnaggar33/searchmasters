@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { inRange } from "../timeFilter.js";
+import TimeBar from "./TimeBar.jsx";
 import { sb, addNotification, formatDate } from "../supabase.js";
 import { loadWorkConfig, isWorkingDay } from "../workdays.js";
 
@@ -38,6 +40,9 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
 }
 
 export default function Leaves({ user }) {
+  const [timeMode, setTimeMode] = useState("all");
+  const [timeCustom, setTimeCustom] = useState({ from: "", to: "" });
+  const [editReq, setEditReq] = useState(null);
   const [members, setMembers] = useState([]);
   const [requests, setRequests] = useState([]);
   const [balances, setBalances] = useState([]);
@@ -193,6 +198,27 @@ export default function Leaves({ user }) {
     await loadAll();
   }
 
+  // ── تعديل طلب موجود ──
+  async function saveEditRequest() {
+    const r = editReq;
+    if (!r.start_date || !r.end_date) { alert("حددي التواريخ"); return; }
+    if (r.end_date < r.start_date) { alert("تاريخ النهاية قبل البداية"); return; }
+    setSaving(true);
+    const v = validate({ ...r, member_name: r.member_name }, { asAdmin: true });
+    const days = r.is_half_day ? 0.5 : (v.days || 1);
+    await sb(`leave_requests?id=eq.${r.id}`, "PATCH", {
+      start_date: r.start_date, end_date: r.end_date,
+      is_half_day: !!r.is_half_day, half_period: r.half_period || null,
+      reason: r.reason || null, days,
+      status: "pending",              // أي تعديل بيرجّع الطلب للمراجعة
+      decided_by: null, decided_at: null, decision_note: null,
+    });
+    if (r.member_name !== user.name) {
+      await addNotification(r.member_name, `✏️ ${user.name} عدّل طلب إجازتك — رجع للمراجعة`, "info");
+    }
+    setSaving(false); setEditReq(null); await loadAll();
+  }
+
   // ── اعتماد / رفض ──
   async function applyDecision() {
     if (!decide) return;
@@ -272,7 +298,9 @@ export default function Leaves({ user }) {
 
   const myBal = balanceOf(user.name);
   const pending = requests.filter(r => r.status === "pending");
-  const visible = requests.filter(r => (tab === "mine" ? r.member_name === user.name : true));
+  const visible = requests.filter(r =>
+    (tab === "mine" ? r.member_name === user.name : true) &&
+    inRange(r.created_at, timeMode, timeCustom));
 
   const RequestCard = ({ r }) => {
     const st = STATUS[r.status] || STATUS.pending;
@@ -318,6 +346,13 @@ export default function Leaves({ user }) {
                 style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", padding: "5px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>رفض</button>
             </>
           )}
+          {(isAdmin || r.member_name === user.name) && (
+            <button onClick={() => setEditReq({
+              ...r,
+              start_date: String(r.start_date).slice(0, 10),
+              end_date: String(r.end_date).slice(0, 10),
+            })} style={{ background: "none", color: "#2563EB", fontSize: 12, textDecoration: "underline" }}>✏️ تعديل</button>
+          )}
           {canCancel && <button onClick={() => setConfirmCancel(r)} style={{ background: "none", color: "#94A3B8", fontSize: 12, textDecoration: "underline" }}>حذف</button>}
         </div>
       </div>
@@ -334,6 +369,8 @@ export default function Leaves({ user }) {
           + طلب إجازة
         </button>
       </div>
+
+      <TimeBar value={timeMode} custom={timeCustom} onChange={setTimeMode} onCustom={setTimeCustom} count={visible.length} />
 
       {/* ── رصيدي ── */}
       <div style={{ ...card, borderRight: "4px solid #2563EB" }}>
@@ -532,6 +569,45 @@ export default function Leaves({ user }) {
                 {saving ? "..." : "تأكيد"}
               </button>
               <button onClick={() => setDecide(null)} style={{ flex: 1, background: "#F1F5F9", color: "#64748B", padding: 12, borderRadius: 10, fontSize: 14 }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL: تعديل طلب ═══ */}
+      {editReq && (
+        <div onClick={e => e.target === e.currentTarget && setEditReq(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 340, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 420 }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 17, fontWeight: 800, color: "#0F172A" }}>✏️ تعديل طلب الإجازة</h3>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 14 }}>{editReq.member_name}</div>
+
+            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#D97706", marginBottom: 14, lineHeight: 1.7 }}>
+              ⚠️ أي تعديل هيرجّع الطلب لحالة «تحت المراجعة» تاني
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>من</div>
+                <input type="date" value={editReq.start_date} onChange={e => setEditReq(f => ({ ...f, start_date: e.target.value, end_date: f.is_half_day ? e.target.value : f.end_date }))} style={inp} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>إلى</div>
+                <input type="date" value={editReq.end_date} disabled={editReq.is_half_day} onChange={e => setEditReq(f => ({ ...f, end_date: e.target.value }))} style={inp} />
+              </div>
+            </div>
+
+            <button onClick={() => setEditReq(f => ({ ...f, is_half_day: !f.is_half_day, end_date: !f.is_half_day ? f.start_date : f.end_date }))}
+              style={{ width: "100%", background: editReq.is_half_day ? "#EFF6FF" : "#F8FAFC", border: `1.5px solid ${editReq.is_half_day ? "#BFDBFE" : "#E2E8F0"}`, color: editReq.is_half_day ? "#2563EB" : "#94A3B8", padding: "8px", borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
+              {editReq.is_half_day ? "✓ نص يوم" : "يوم كامل"}
+            </button>
+
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600 }}>السبب</div>
+            <textarea value={editReq.reason || ""} onChange={e => setEditReq(f => ({ ...f, reason: e.target.value }))} rows={2} style={{ ...inp, resize: "vertical", marginBottom: 14 }} />
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveEditRequest} disabled={saving} style={{ flex: 1, background: saving ? "#94A3B8" : "linear-gradient(135deg,#2563EB,#7C3AED)", color: "#fff", padding: 12, borderRadius: 10, fontSize: 14, fontWeight: 700 }}>حفظ ✓</button>
+              <button onClick={() => setEditReq(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "12px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
             </div>
           </div>
         </div>
