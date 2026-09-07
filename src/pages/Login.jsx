@@ -1,9 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { sb } from "../supabase.js";
 
 const APP_PASSWORD = "searchmasters2025";
 
 export default function Login({ onLogin }) {
+  const [names, setNames] = useState([]);
+
+  useEffect(() => {
+    sb("team_members?is_active=eq.true&select=name&order=name")
+      .then(r => setNames((r || []).map(x => x.name).filter(Boolean)))
+      .catch(() => {});
+  }, []);
+
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -43,7 +51,7 @@ export default function Login({ onLogin }) {
               <label style={{ fontSize: 13, color: "#64748B", marginBottom: 6, display: "block", fontWeight: 600 }}>اسمك في الفريق</label>
               <input value={name} onChange={e => { setName(e.target.value); setError(""); }} placeholder="مثال: هدير" style={inp} list="names-list" onFocus={e => e.target.style.border = "1.5px solid #2563EB"} onBlur={e => e.target.style.border = "1.5px solid #E2E8F0"} />
               <datalist id="names-list">
-                {["هدير","مينا","مريم","هدى","هند","د.محمد علي"].map(n => <option key={n} value={n} />)}
+                {names.map(n => <option key={n} value={n} />)}
               </datalist>
             </div>
 
