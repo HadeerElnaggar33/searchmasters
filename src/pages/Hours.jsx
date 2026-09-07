@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { sb, MONTHS, CURRENT_MONTH } from "../supabase.js";
 import { loadWorkConfig, isWorkingDay, countWorkingDays } from "../workdays.js";
 
@@ -203,7 +204,7 @@ export default function Hours({ user }) {
     return (
       <div style={{ ...card, marginBottom: 12, borderRight: isMe ? "4px solid #2563EB" : "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          <div style={{ width: 34, height: 34, borderRadius: "50%", background: avatar || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{name[0]}</div>
+          <Avatar name={name} color={avatar || "#2563EB"} size={34} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>{name}{isMe ? " (إنتي)" : ""}</div>
             <div style={{ fontSize: 11, color: "#94A3B8" }}>{st.presentDays} يوم حضور من {st.targetDays} يوم تارجت</div>
