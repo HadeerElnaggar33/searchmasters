@@ -664,8 +664,9 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
     const dep = tasks.find(x => String(x.id) === String(blockForm.blocked_by));
     const t = blockOpen;
 
+    const editing = t.status === "help_needed";
     await sb(`tasks?id=eq.${t.id}`, "PATCH", {
-      status_before_help: t.status === "help_needed" ? t.status_before_help : t.status,
+      status_before_help: editing ? t.status_before_help : t.status,
       status: "help_needed",
       blocked_reason: blockForm.reason.trim(),
       waiting_on: blockForm.waiting_on || null,
@@ -674,8 +675,8 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
       help_manual_override: false,
     });
 
-    await addHistory(t.id, "blocked", user.name,
-      `توقفت: ${blockForm.reason.trim()}${blockForm.waiting_on ? ` — منتظرين ${blockForm.waiting_on}` : ""}`);
+    await addHistory(t.id, editing ? "block_edited" : "blocked", user.name,
+      `${editing ? "تعديل سبب التوقف" : "توقفت"}: ${blockForm.reason.trim()}${blockForm.waiting_on ? ` — منتظرين ${blockForm.waiting_on}` : ""}`);
 
     if (blockForm.waiting_on && blockForm.waiting_on !== user.name) {
       await addNotification(blockForm.waiting_on, `⏸ ${user.name} متوقف في «${t.title}» ومنتظر إجراء منك`, "info", t.id);
@@ -1781,10 +1782,22 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
                         </div>
                       )}
                       {canEdit && (
-                        <button onClick={() => clearBlock(showDetail)}
-                          style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700, marginTop: 8 }}>
-                          ✅ التوقف اتحل
-                        </button>
+                        <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+                          <button onClick={() => clearBlock(showDetail)}
+                            style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#059669", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+                            ✅ التوقف اتحل
+                          </button>
+                          <button onClick={() => {
+                            setBlockForm({
+                              reason: showDetail.blocked_reason || "",
+                              waiting_on: showDetail.waiting_on || "",
+                              blocked_by: showDetail.blocked_by_task_id || "",
+                            });
+                            setBlockOpen(showDetail);
+                          }} style={{ background: "#FFFFFF", border: "1px solid #FBCFE8", color: "#DB2777", padding: "5px 13px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+                            ✏️ تعديل السبب
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -2421,13 +2434,17 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
           <div dir="rtl" style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 430, maxHeight: "92vh", overflowY: "auto" }}>
             <div style={{ textAlign: "center", marginBottom: 14 }}>
               <div style={{ fontSize: 34, marginBottom: 6 }}>⏸</div>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#0F172A" }}>التاسك متوقفة</h3>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#0F172A" }}>
+                {blockOpen.status === "help_needed" ? "تعديل سبب التوقف" : "التاسك متوقفة"}
+              </h3>
               <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 4 }}>{blockOpen.title}</div>
             </div>
 
-            <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.7 }}>
-              دي مش «خلصت وراجعها» — دي <b>متوقفة ومحتاجة تدخل</b>. حالتها هتبقى 🆘 طلب نجدة، ولما التوقف يتحل ترجع لحالتها.
-            </div>
+            {blockOpen.status !== "help_needed" && (
+              <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "8px 12px", fontSize: 11, color: "#2563EB", marginBottom: 14, lineHeight: 1.7 }}>
+                دي مش «خلصت وراجعها» — دي <b>متوقفة ومحتاجة تدخل</b>. حالتها هتبقى 🆘 طلب نجدة، ولما التوقف يتحل ترجع لحالتها.
+              </div>
+            )}
 
             <div style={{ fontSize: 12, color: "#64748B", marginBottom: 5, fontWeight: 600 }}>سبب التوقف *</div>
             <textarea value={blockForm.reason} onChange={e => setBlockForm(f => ({ ...f, reason: e.target.value }))} rows={3}
@@ -2450,7 +2467,7 @@ export default function Tasks({ user, voiceTrigger, incomingFilter, openTaskId }
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={saveBlock} disabled={savingBlock}
                 style={{ flex: 1, background: savingBlock ? "#94A3B8" : "linear-gradient(135deg,#DB2777,#BE185D)", color: "#fff", padding: 13, borderRadius: 10, fontSize: 15, fontWeight: 700 }}>
-                {savingBlock ? "..." : "سجّل التوقف"}
+                {savingBlock ? "..." : (blockOpen.status === "help_needed" ? "حفظ التعديل ✓" : "سجّل التوقف")}
               </button>
               <button onClick={() => setBlockOpen(null)} style={{ background: "#F1F5F9", color: "#64748B", padding: "13px 20px", borderRadius: 10, fontSize: 14 }}>إلغاء</button>
             </div>
