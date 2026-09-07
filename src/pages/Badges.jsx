@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { sb, addNotification, CURRENT_MONTH } from "../supabase.js";
 import { runBadges, GRADES, IMPACT, medalPoints } from "../badges.js";
+import { inRange, fullStamp } from "../timeFilter.js";
+import TimeBar from "./TimeBar.jsx";
 import { addScore } from "../score.js";
 
 const CATS = ["الأداء", "الجودة", "الفريق", "الالتزام", "الإنجازات", "التدريب", "أثر", "الهزار"];
@@ -15,6 +17,8 @@ export default function Badges({ user }) {
   const [award, setAward] = useState(null);        // الشارة اللي بتتمنح
   const [awardForm, setAwardForm] = useState({ member: "", note: "", level: "small" });
   const [confirmRemove, setConfirmRemove] = useState(null);
+  const [timeMode, setTimeMode] = useState("all");
+  const [timeCustom, setTimeCustom] = useState({ from: "", to: "" });
   const [settings, setSettings] = useState({});
   const [detail, setDetail] = useState(null);       // ميدالية مفتوحة بكل بياناتها
 
@@ -100,7 +104,7 @@ export default function Badges({ user }) {
 
   if (loading) return <div style={{ textAlign: "center", padding: 60, color: "#94A3B8" }}>جاري التحميل...</div>;
 
-  const ownedOf = name => owned.filter(o => o.member_name === name);
+  const ownedOf = name => owned.filter(o => o.member_name === name && inRange(o.awarded_at, timeMode, timeCustom));
   const myBadges = ownedOf(user.name);
   const holdersOf = badgeId => owned.filter(o => String(o.badge_id) === String(badgeId));
 
@@ -140,6 +144,8 @@ export default function Badges({ user }) {
           </button>
         )}
       </div>
+
+      <TimeBar value={timeMode} custom={timeCustom} onChange={setTimeMode} onCustom={setTimeCustom} />
 
       {isAdmin && (
         <div style={{ display: "flex", gap: 6, marginBottom: 16, background: "#F1F5F9", borderRadius: 12, padding: 4 }}>
