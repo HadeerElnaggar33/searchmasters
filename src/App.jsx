@@ -205,7 +205,14 @@ export default function App() {
   // ── تايمرات التاسكات (متوازية) — بتظهر في سايدبار ثابت ──
   useEffect(() => {
     if (!user) return;
-    const load = () => activeTimers(user.name).then(setTimers).catch(() => {});
+    const load = async () => {
+      try {
+        const rows = isAdmin
+          ? (await sb("task_timers?ended_at=is.null&order=started_at.desc")) || []
+          : await activeTimers(user.name);
+        setTimers(rows);
+      } catch (e) { /* تجاهل */ }
+    };
     load();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
@@ -218,7 +225,7 @@ export default function App() {
   }, [timers.length]);
 
   async function stopOneTimer(taskId) {
-    await stopTimer(user.name, taskId);
+    await stopTimer(user.name, taskId);   // كل واحد بيوقف تايمره بس
     setTimers(list => list.filter(x => String(x.task_id) !== String(taskId)));
   }
 
@@ -307,7 +314,13 @@ export default function App() {
   const isAdmin = user.role === "admin" || user.role === "team_leader";
 
   const PAGES = {
-    dashboard:  <Dashboard  user={user} onNavigate={(p, f) => { if (f) setTaskFilter({ ...f, _k: Date.now() }); setPage(p); }} />,
+    dashboard:  <Dashboard  user={user} onNavigate={(p, f) => {
+      if (f) {
+        setTaskFilter({ ...f, _k: Date.now() });
+        if (f.openTask) setOpenTaskId({ id: f.openTask, k: Date.now() });
+      }
+      setPage(p);
+    }} />,
     tasks: <TabHub id="tasks" user={user} tabs={[
       { v: "list",     l: "📋 قائمة",  render: () => <Tasks user={user} voiceTrigger={voiceTrigger} incomingFilter={taskFilter} openTaskId={openTaskId} /> },
       { v: "calendar", l: "🗓 تقويم",  render: () => <Calendar user={user} /> },
@@ -565,21 +578,24 @@ export default function App() {
         }}>
           <div style={{ background: "#065F46", color: "#fff", borderRadius: 12, padding: "6px 12px", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", gap: 6 }}>
             <span>⏱</span>
-            <span style={{ flex: 1 }}>تايمرات شغالة ({timers.length})</span>
+            <span style={{ flex: 1 }}>تاسكات شغالة ({timers.length})</span>
           </div>
           {timers.map(t => (
-            <div key={t.id} style={{ background: "#FFFFFF", border: "2px solid #A7F3D0", borderRadius: 14, padding: "9px 12px", boxShadow: "0 4px 14px rgba(5,150,105,0.18)" }}>
+            <div key={t.id} onClick={() => { setOpenTaskId({ id: t.task_id, k: Date.now() }); setTaskFilter({ status: "all", _k: Date.now() }); setPage("tasks"); }}
+              style={{ background: "#FFFFFF", border: "2px solid #A7F3D0", borderRadius: 14, padding: "9px 12px", boxShadow: "0 4px 14px rgba(5,150,105,0.18)", cursor: "pointer" }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>
                 {t.task_title}
               </div>
-              {t.project_name && (
-                <div style={{ fontSize: 10, color: "#94A3B8", marginBottom: 5 }}>📁 {t.project_name}</div>
-              )}
+              <div style={{ fontSize: 10, color: "#94A3B8", marginBottom: 5 }}>
+                {isAdmin && t.member_name !== user.name ? `👤 ${t.member_name}` : ""}
+                {t.project_name ? `${isAdmin && t.member_name !== user.name ? " · " : ""}📁 ${t.project_name}` : ""}
+              </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ flex: 1, fontSize: 16, fontWeight: 800, color: "#059669", fontVariantNumeric: "tabular-nums" }}>
                   {fmtClock(Math.floor((Date.now() - new Date(t.started_at)) / 1000))}
                 </span>
-                <button onClick={() => stopOneTimer(t.task_id)} title="إيقاف"
+                <button onClick={e => { e.stopPropagation(); stopOneTimer(t.task_id); }} title="إيقاف"
+                  disabled={t.member_name !== user.name}
                   style={{ background: "#DC2626", color: "#fff", padding: "4px 12px", borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
                   ⏹ إيقاف
                 </button>
