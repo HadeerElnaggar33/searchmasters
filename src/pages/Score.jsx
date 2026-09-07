@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { inRange } from "../timeFilter.js";
 import TimeBar from "./TimeBar.jsx";
 import { sb, MONTHS, CURRENT_MONTH, formatDate, addNotification } from "../supabase.js";
@@ -558,7 +559,7 @@ export default function Score({ user }) {
               <div key={name} style={{ background: i === 0 ? "#FFFBEB" : "#F8FAFC", border: `1px solid ${i === 0 ? "#FDE68A" : "#E2E8F0"}`, borderRadius: 12, padding: "12px 14px", marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 16, minWidth: 24 }}>{["🥇", "🥈", "🥉"][i] || `${i + 1}.`}</span>
-                  <div style={{ width: 30, height: 30, borderRadius: "50%", background: m?.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{name[0]}</div>
+                  <Avatar name={name} members={members} size={30} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>{name}</div>
                     <div style={{ fontSize: 11, color: "#94A3B8" }}>{mv.length} حركة</div>
@@ -609,7 +610,7 @@ export default function Score({ user }) {
             return (
               <div key={m.id} style={{ ...card, marginBottom: 12, borderRight: done ? "4px solid #059669" : "4px solid #E2E8F0" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{m.name[0]}</div>
+                  <Avatar member={m} size={32} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>{m.name}</div>
                     <div style={{ fontSize: 11, color: "#94A3B8" }}>{dayTasks.length} تاسك في اليوم ده · الرصيد {totals[m.name] || 0}</div>
