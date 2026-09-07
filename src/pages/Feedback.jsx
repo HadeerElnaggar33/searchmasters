@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Avatar from "../utils/Avatar.jsx";
 import { inRange } from "../timeFilter.js";
 import TimeBar from "./TimeBar.jsx";
 import { sb, addNotification, MONTHS, CURRENT_MONTH } from "../supabase.js";
@@ -183,7 +184,7 @@ export default function Feedback({ user }) {
               return (
                 <button key={m.id} onClick={() => setFilterMember(filterMember === m.name ? "all" : m.name)}
                   style={{ textAlign: "right", background: filterMember === m.name ? "#EFF6FF" : "#F8FAFC", border: `1.5px solid ${filterMember === m.name ? "#2563EB" : "#E2E8F0"}`, borderRadius: 12, padding: "10px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: 30, height: 30, borderRadius: "50%", background: m.avatar_color || "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{m.name[0]}</div>
+                  <Avatar member={m} size={30} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
                     <div style={{ fontSize: 11, color: "#94A3B8" }}>👍 {pos} · ⚠️ {neg}</div>
