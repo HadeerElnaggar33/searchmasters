@@ -283,17 +283,6 @@ export default function App() {
     return () => clearInterval(t);
   }, [user]);
 
-  // ── المود اليومي: يفتح مرة واحدة بس في اليوم ──
-  useEffect(() => {
-    if (!user) return;
-    const key = `sm_mood_${user.name}_${new Date().toISOString().slice(0, 10)}`;
-    if (localStorage.getItem(key)) return;
-    localStorage.setItem(key, "1");
-    const d = new Date().getDay();
-    if (d === 5 || d === 6) return;   // الجمعة والسبت
-    setPage("mood");
-  }, [user]);
-
   // ── محرك التاسكات المتكررة: مرة واحدة كل جلسة، بعد فتح الأبلكيشن ──
   useEffect(() => {
     if (!user || engineRef.current) return;
@@ -325,6 +314,44 @@ export default function App() {
   }
 
   function logout() { localStorage.removeItem("sm_user"); setUser(null); }
+
+  // ── تعديل ١٠: أرقام على بنود القائمة ──
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    async function loadCounts() {
+      try {
+        const mm = String(new Date().getMonth() + 1).padStart(2, "0");
+        const yy = new Date().getFullYear();
+        const [tk, nt, lg, dw, att, hr, fb, lv] = await Promise.all([
+          sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&select=assigned_to,status,is_parent`),
+          sb(`notifications?recipient=eq.${encodeURIComponent(user.name)}&is_read=eq.false&select=id`),
+          sb(`score_ledger?month=eq.${encodeURIComponent(CURRENT_MONTH)}&member_name=eq.${encodeURIComponent(user.name)}&select=points`),
+          sb(`draws?status=eq.won&winner_name=eq.${encodeURIComponent(user.name)}&select=id`),
+          sb(`attendance?member_name=eq.${encodeURIComponent(user.name)}&date=gte.${yy}-${mm}-01&select=working_minutes,status`),
+          sb(`help_requests?helper=eq.${encodeURIComponent(user.name)}&status=eq.open&select=id`),
+          sb(`feedback_notes?member_name=eq.${encodeURIComponent(user.name)}&acknowledged=eq.false&select=id`),
+          sb("leave_requests?status=eq.pending&select=id"),
+        ]);
+        if (!alive) return;
+        const mine = (tk || []).filter(t => t.assigned_to === user.name && t.status !== "completed" && t.status !== "cancelled" && !t.is_parent);
+        const mins = (att || []).filter(a => a.status !== "leave").reduce((a, x) => a + (Number(x.working_minutes) || 0), 0);
+        setCounts({
+          tasks: mine.length,
+          notifications: (nt || []).length,
+          score: Math.round((lg || []).reduce((a, r) => a + Number(r.points || 0), 0) * 10) / 10,
+          draws: (dw || []).length,
+          attendance: Math.round(mins / 60),
+          help: (hr || []).length,
+          feedback: (fb || []).length,
+          leaves: (lv || []).length,
+        });
+      } catch (e) { /* تجاهل */ }
+    }
+    loadCounts();
+    const t = setInterval(loadCounts, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user, page]);
 
   if (!user) return <Login onLogin={u => setUser(u)} />;
 
@@ -401,43 +428,6 @@ export default function App() {
     });
   }
 
-  // ── تعديل ١٠: أرقام على بنود القائمة ──
-  useEffect(() => {
-    if (!user) return;
-    let alive = true;
-    async function loadCounts() {
-      try {
-        const mm = String(new Date().getMonth() + 1).padStart(2, "0");
-        const yy = new Date().getFullYear();
-        const [tk, nt, lg, dw, att, hr, fb, lv] = await Promise.all([
-          sb(`tasks?month=eq.${encodeURIComponent(CURRENT_MONTH)}&select=assigned_to,status,is_parent`),
-          sb(`notifications?recipient=eq.${encodeURIComponent(user.name)}&is_read=eq.false&select=id`),
-          sb(`score_ledger?month=eq.${encodeURIComponent(CURRENT_MONTH)}&member_name=eq.${encodeURIComponent(user.name)}&select=points`),
-          sb(`draws?status=eq.won&winner_name=eq.${encodeURIComponent(user.name)}&select=id`),
-          sb(`attendance?member_name=eq.${encodeURIComponent(user.name)}&date=gte.${yy}-${mm}-01&select=working_minutes,status`),
-          sb(`help_requests?helper=eq.${encodeURIComponent(user.name)}&status=eq.open&select=id`),
-          sb(`feedback_notes?member_name=eq.${encodeURIComponent(user.name)}&acknowledged=eq.false&select=id`),
-          sb("leave_requests?status=eq.pending&select=id"),
-        ]);
-        if (!alive) return;
-        const mine = (tk || []).filter(t => t.assigned_to === user.name && t.status !== "completed" && t.status !== "cancelled" && !t.is_parent);
-        const mins = (att || []).filter(a => a.status !== "leave").reduce((a, x) => a + (Number(x.working_minutes) || 0), 0);
-        setCounts({
-          tasks: mine.length,
-          notifications: (nt || []).length,
-          score: Math.round((lg || []).reduce((a, r) => a + Number(r.points || 0), 0) * 10) / 10,
-          draws: (dw || []).length,
-          attendance: Math.round(mins / 60),
-          help: (hr || []).length,
-          feedback: (fb || []).length,
-          leaves: (lv || []).length,
-        });
-      } catch (e) { /* تجاهل */ }
-    }
-    loadCounts();
-    const t = setInterval(loadCounts, 60000);
-    return () => { alive = false; clearInterval(t); };
-  }, [user, page]);
 
   // أرقام التنبيه تختفي عند الصفر · أرقام التحفيز بتفضل ظاهرة
   function badgeOf(key) {
