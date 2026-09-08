@@ -94,11 +94,17 @@ export async function loadLedger(month) {
 }
 
 // ── تجميع الأرصدة من السجل ──
+// تقريب لخانة عشرية واحدة — بيمنع كسور الحساب العشري (64.59999999999997)
+export function round1(n) {
+  return Math.round((Number(n) || 0) * 10) / 10;
+}
+
 export function totalsFrom(ledger) {
   const map = {};
   for (const r of ledger) {
     map[r.member_name] = (map[r.member_name] || 0) + Number(r.points || 0);
   }
+  for (const k of Object.keys(map)) map[k] = round1(map[k]);
   return map;
 }
 
@@ -164,7 +170,6 @@ export async function loadPointsConfig() {
   return cfg;
 }
 
-function round1(n) { return Math.round(n * 10) / 10; }
 
 // ── الحساب: بيرجّع المجموع وتفصيل كل بند بالعامية ──
 export function computeTaskPoints(task, ctx, cfg = DEFAULT_PTS) {
