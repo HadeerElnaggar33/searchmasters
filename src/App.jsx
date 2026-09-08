@@ -666,17 +666,17 @@ export default function App() {
       })()}
 
       {/* HEADER */}
-      <header style={{ background: "#FFFFFF", borderBottom: "1px solid #E2E8F0", padding: isMobile ? "0 12px" : "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56, position: "sticky", top: 0, zIndex: 100, flexShrink: 0, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <header style={{ background: "#FFFFFF", borderBottom: "1px solid #E2E8F0", padding: isMobile ? "6px 8px" : "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minHeight: 56, position: "sticky", top: 0, zIndex: 100, flexShrink: 0, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 7 : 10, minWidth: 0, flexShrink: 1 }}>
           {isMobile && (
-            <button onClick={() => setShowSidebar(true)} style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>☰</button>
+            <button onClick={() => setShowSidebar(true)} style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>☰</button>
           )}
-          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#2563EB,#7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900, flexShrink: 0, color: "#fff" }}>S</div>
-          <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, color: "#0F172A" }}>Search Masters</div>
+          <div style={{ width: isMobile ? 28 : 32, height: isMobile ? 28 : 32, borderRadius: "50%", background: "linear-gradient(135deg,#2563EB,#7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 13 : 15, fontWeight: 900, flexShrink: 0, color: "#fff" }}>S</div>
+          {!isMobile && <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", whiteSpace: "nowrap" }}>Search Masters</div>}
           {!isMobile && <span style={{ fontSize: 11, color: "#94A3B8", background: "#F1F5F9", padding: "2px 8px", borderRadius: 6 }}>{CURRENT_MONTH}</span>}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 }}>
 
           {/* ═══ مؤقت العمل (تعديل ٣) ═══ */}
           {(() => {
@@ -732,15 +732,15 @@ export default function App() {
 
           {/* البحث */}
           <button onClick={openSearch} title="بحث سريع"
-            style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", width: 36, height: 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>🔎</button>
+            style={{ background: "#F1F5F9", border: "1px solid #E2E8F0", color: "#64748B", width: isMobile ? 32 : 36, height: isMobile ? 32 : 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 13 : 15, flexShrink: 0 }}>🔎</button>
 
           {/* المايك */}
           {(user.role === "admin" || user.can_assign_tasks === true) && (
             <button onClick={() => { setPage("tasks"); setVoiceTrigger(x => x + 1); }} title="تاسك بالصوت"
-              style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#7C3AED", width: 36, height: 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>🎤</button>
+              style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#7C3AED", width: isMobile ? 32 : 36, height: isMobile ? 32 : 36, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 13 : 15, flexShrink: 0 }}>🎤</button>
           )}
 
-          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 6px #10B981" }}></div>
+          {!isMobile && <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 6px #10B981" }}></div>}
 
           {/* Notifications */}
           <div style={{ position: "relative" }}>
