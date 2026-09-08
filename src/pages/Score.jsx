@@ -3,7 +3,7 @@ import Avatar from "../utils/Avatar.jsx";
 import { inRange } from "../timeFilter.js";
 import TimeBar from "./TimeBar.jsx";
 import { sb, MONTHS, CURRENT_MONTH, formatDate, addNotification } from "../supabase.js";
-import { SCORE, SOURCE_LABEL, addScore, replaceTaskScore, replaceScoreByRef, loadLedger, totalsFrom, rankMembers, loadPointsConfig, DEFAULT_PTS } from "../score.js";
+import { SCORE, SOURCE_LABEL, addScore, replaceTaskScore, replaceScoreByRef, loadLedger, totalsFrom, rankMembers, loadPointsConfig, DEFAULT_PTS, round1 } from "../score.js";
 import { loadWorkConfig, isWorkingDay } from "../workdays.js";
 
 const Q = [
@@ -313,8 +313,16 @@ export default function Score({ user }) {
         <>
           <div style={{ ...card, borderTop: "4px solid #2563EB", textAlign: "center" }}>
             <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 4 }}>رصيدك في {selectedMonth}</div>
-            <div style={{ fontSize: 46, fontWeight: 800, color: myTotal >= 0 ? "#2563EB" : "#DC2626", lineHeight: 1.1 }}>
-              {myTotal > 0 ? "+" : ""}{myTotal}
+            <div style={{
+              fontSize: "clamp(30px, 11vw, 46px)",
+              fontWeight: 800,
+              color: myTotal >= 0 ? "#2563EB" : "#DC2626",
+              lineHeight: 1.15,
+              direction: "ltr",
+              wordBreak: "break-all",
+              maxWidth: "100%",
+            }}>
+              {myTotal > 0 ? "+" : ""}{round1(myTotal)}
             </div>
             <div style={{ fontSize: 13, color: "#64748B", marginTop: 6 }}>
               ترتيبك <b style={{ color: "#0F172A", fontSize: 16 }}>{myRank || "—"}</b> من {names.length}
@@ -341,7 +349,7 @@ export default function Score({ user }) {
             {movesByDay(user.name).length === 0
               ? <div style={{ textAlign: "center", color: "#94A3B8", fontSize: 13, padding: "16px 0" }}>مفيش حركات على رصيدك الشهر ده</div>
               : movesByDay(user.name).map(([day, rows]) => {
-                  const sum = rows.reduce((s, r) => s + Number(r.points), 0);
+                  const sum = round1(rows.reduce((s, r) => s + Number(r.points || 0), 0));
                   return (
                     <div key={day} style={{ marginBottom: 14 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
